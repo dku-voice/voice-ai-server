@@ -1,4 +1,22 @@
+# === Voice AI Server V2.0 Dependencies ===
+# FastAPI + WebSocket
 fastapi
-uvicorn
+uvicorn[standard]
+websockets
 python-multipart
+
+# Schema / Validation
 pydantic
+
+# STT (faster-whisper: CTranslate2 기반, whisper 대비 4배 빠름)
+faster-whisper
+
+# VAD (Silero VAD: 음성 구간 감지)
+silero-vad
+
+# LLM (Phase 3에서 사용 예정)
+openai
+
+# Audio processing
+numpy
+soundfile
