@@ -13,6 +13,7 @@ import logging
 from typing import List
 
 from openai import OpenAI
+from httpx import Timeout
 from starlette.concurrency import run_in_threadpool
 
 from app.schemas import OrderItem
@@ -31,7 +32,14 @@ def _get_client() -> OpenAI:
         api_key = os.getenv("OPENAI_API_KEY", "")
         if not api_key:
             print("[LLM] ⚠️ OPENAI_API_KEY 환경변수 없음! LLM 호출 시 에러날 수 있음")
-        _client = OpenAI(api_key=api_key)
+        # 🔴 CRITICAL fix: 기본 timeout이 600초(10분)이라서
+        # OpenAI 장애 시 threadpool worker가 10분씩 점유됨
+        # → VAD/STT도 같은 pool 쓰니까 전체 서버 먹통
+        # → 30초 timeout 설정으로 빠르게 실패 → Phase 3 fallback 진입
+        _client = OpenAI(
+            api_key=api_key,
+            timeout=Timeout(30.0, connect=10.0),
+        )
     return _client
 
 
@@ -145,6 +153,10 @@ def _parse_llm_response(raw_text: str) -> List[OrderItem]:
 
     parsed = json.loads(cleaned)
 
+    # HIGH-2 fix: LLM이 배열이 아닌 걸 뱉을 때 방어 (dict나 string 올 수 있음)
+    if not isinstance(parsed, list):
+        raise json.JSONDecodeError("LLM 응답이 JSON 배열이 아님", cleaned, 0)
+
     # 파싱 결과를 OrderItem으로 변환
     items = []
     for entry in parsed:
@@ -158,7 +170,7 @@ def _parse_llm_response(raw_text: str) -> List[OrderItem]:
     return items
 
 
-def _call_llm_sync(text: str) -> List[OrderItem]:
+def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
     """
     동기 LLM 호출 (threadpool에서 실행됨)
 
@@ -170,7 +182,9 @@ def _call_llm_sync(text: str) -> List[OrderItem]:
     client = _get_client()
 
     # ===== Phase 1: 첫 번째 LLM 호출 =====
-    print(f"[LLM] Phase 1: LLM 호출 시작 (text: '{text[:50]}...')")
+    # HIGH-4 fix: 짧은 텍스트에서 불필요한 '...' 표시 방지
+    display = text[:50] + "..." if len(text) > 50 else text
+    print(f"[LLM] Phase 1: LLM 호출 시작 (text: '{display}')")
     try:
         response = client.chat.completions.create(
             model=LLM_MODEL,
@@ -184,9 +198,13 @@ def _call_llm_sync(text: str) -> List[OrderItem]:
         raw = response.choices[0].message.content
         print(f"[LLM] Phase 1 응답: {raw}")
 
+        # content가 None일 수 있음 (OpenAI content filter 트리거 등)
+        if raw is None:
+            raise ValueError("LLM 응답 content가 None")
+
         items = _parse_llm_response(raw)
         print(f"[LLM] Phase 1 성공! {len(items)}건 파싱됨")
-        return items
+        return ("success", items)  # MED-2 fix: phase 구분자 포함
 
     except json.JSONDecodeError as e:
         # LLM이 JSON이 아닌 걸 뱉었을 때 (제일 흔한 에러)
@@ -198,7 +216,7 @@ def _call_llm_sync(text: str) -> List[OrderItem]:
         logger.error(f"[LLM] Phase 1 실패: {e}")
         # API 자체가 터진 거면 Phase 2도 의미 없으니 바로 Phase 3
         print("[LLM] API 에러 → Phase 3 fallback으로 직행")
-        return _fallback_keyword_parse(text)
+        return ("fallback", _fallback_keyword_parse(text))
 
     # ===== Phase 2: 재시도 (더 강한 JSON 지시) =====
     print("[LLM] Phase 2: JSON 강제 재시도")
@@ -221,9 +239,12 @@ def _call_llm_sync(text: str) -> List[OrderItem]:
         raw = response.choices[0].message.content
         print(f"[LLM] Phase 2 응답: {raw}")
 
+        if raw is None:
+            raise ValueError("LLM 응답 content가 None")
+
         items = _parse_llm_response(raw)
         print(f"[LLM] Phase 2 성공! {len(items)}건 파싱됨")
-        return items
+        return ("success", items)
 
     except Exception as e:
         # Phase 2도 실패 → 더 이상 LLM한테 기대할 게 없음
@@ -234,7 +255,7 @@ def _call_llm_sync(text: str) -> List[OrderItem]:
     # 여기까지 왔으면 LLM이 완전히 못 쓰는 상태
     # v1.0의 단순한 키워드 매칭이라도 돌려서 최소한의 서비스 제공
     print("[LLM] Phase 3: v1.0 레거시 fallback 실행")
-    return _fallback_keyword_parse(text)
+    return ("fallback", _fallback_keyword_parse(text))
 
 
 async def extract_order(text: str) -> dict:
@@ -257,16 +278,13 @@ async def extract_order(text: str) -> dict:
 
     try:
         # LLM 호출도 블로킹이니까 threadpool에서 실행
-        items = await run_in_threadpool(_call_llm_sync, text)
+        # MED-2 fix: tuple 반환으로 phase 구분
+        phase, items = await run_in_threadpool(_call_llm_sync, text)
 
-        # fallback인지 판별: LLM 호출 과정에서 fallback 탔으면
-        # items에 options가 전부 빈 배열 → fallback 가능성 높음
-        # 근데 정확한 판별은 어려워서 일단 success로 통일
-        # TODO: Phase 구분자를 리턴하도록 개선 필요
         return {
-            "status": "success",
+            "status": phase,
             "items": items,
-            "error_msg": None,
+            "error_msg": None if phase == "success" else "LLM 실패, 키워드 매칭으로 대체",
         }
 
     except Exception as e:

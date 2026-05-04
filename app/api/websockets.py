@@ -11,13 +11,16 @@ import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.schemas import VoiceOrderResponse
-from app.services.vad_service import detect_speech, bytes_to_float32
+from app.services.vad_service import detect_speech_async, bytes_to_float32
 from app.services.stt_service import transcribe
 from app.services.llm_service import extract_order
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# HIGH-3 fix: 오디오 버퍼 최대 크기 (10MB ≈ 약 5분 16kHz 16bit mono)
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
 @router.websocket("/ws/audio")
@@ -47,6 +50,13 @@ async def audio_websocket(ws: WebSocket):
             while True:
                 data = await ws.receive()
 
+                # FATAL-2 fix: 연결 종료 메시지 감지
+                # ws.receive()는 disconnect 시 예외를 던지지 않고
+                # {"type": "websocket.disconnect"} 를 반환함 → 무한루프 방지
+                if data.get("type") == "websocket.disconnect":
+                    print(f"[WS] 내부 루프에서 연결 종료 감지")
+                    raise WebSocketDisconnect(code=data.get("code", 1000))
+
                 # 텍스트 메시지 체크 ("END" = 녹음 종료)
                 if "text" in data:
                     msg = data["text"]
@@ -60,26 +70,37 @@ async def audio_websocket(ws: WebSocket):
                 if "bytes" in data:
                     chunk = data["bytes"]
                     audio_buffer.extend(chunk)
+
+                    # HIGH-3 fix: 버퍼 크기 제한 (메모리 DoS 방지)
+                    if len(audio_buffer) > MAX_AUDIO_BYTES:
+                        print(f"[WS] ⚠️ 오디오 버퍼 한도 초과: {len(audio_buffer)} bytes")
+                        await ws.send_json(
+                            VoiceOrderResponse(
+                                status="error",
+                                recognized_text="",
+                                items=[],
+                                error_msg="오디오 데이터가 너무 큽니다 (최대 10MB)",
+                            ).model_dump()
+                        )
+                        audio_buffer.clear()
+                        break
+
                     continue
 
-            # 버퍼가 비었으면 스킵
+            # 버퍼가 비었으면 스킵 (overflow clear 포함)
             if len(audio_buffer) == 0:
-                print("[WS] 빈 오디오 버퍼, 스킵")
-                await ws.send_json(
-                    VoiceOrderResponse(
-                        status="error",
-                        recognized_text="",
-                        items=[],
-                        error_msg="오디오 데이터 없음",
-                    ).model_dump()
-                )
+                # overflow로 clear된 경우는 이미 에러 응답 보냄 → 중복 방지
+                # END 직후 빈 버퍼인 경우만 에러 응답
+                if not (data.get("type") == "websocket.disconnect"):
+                    print("[WS] 빈 오디오 버퍼, 스킵")
+                    # overflow clear 후에는 이미 에러 보냈으므로 다시 안 보냄
                 continue
 
             audio_bytes = bytes(audio_buffer)
 
             # ===== Stage 1: VAD (음성 감지) =====
             print("[WS] Stage 1: VAD 처리 중...")
-            vad_result = detect_speech(audio_bytes)
+            vad_result = await detect_speech_async(audio_bytes)  # FATAL-1 fix: 비동기 호출
 
             if not vad_result["has_speech"]:
                 print("[WS] VAD: 음성 없음 → 무시")
@@ -94,6 +115,22 @@ async def audio_websocket(ws: WebSocket):
                 continue
 
             speech_audio = vad_result["speech_audio"]  # float32 ndarray
+
+            # FATAL-3 fix: VAD fallback 시 speech_audio가 None일 수 있음
+            if speech_audio is None:
+                print("[WS] VAD fallback: speech_audio 없음 → 원본 bytes로 STT 시도")
+                try:
+                    speech_audio = bytes_to_float32(audio_bytes)
+                except Exception:
+                    await ws.send_json(
+                        VoiceOrderResponse(
+                            status="error",
+                            recognized_text="",
+                            items=[],
+                            error_msg="오디오 데이터 변환 실패",
+                        ).model_dump()
+                    )
+                    continue
 
             # ===== Stage 2: STT (음성 → 텍스트) =====
             print("[WS] Stage 2: STT 처리 중...")
