@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import logging
 from silero_vad import get_speech_timestamps  # 🚨 안전한 청킹(Chunking) 처리를 위해 추가
+from starlette.concurrency import run_in_threadpool
 
 from app.config import VAD_THRESHOLD, VAD_SAMPLE_RATE
 
@@ -76,7 +77,11 @@ def detect_speech(audio_bytes: bytes) -> dict:
         # confidence = model(audio_tensor, VAD_SAMPLE_RATE).item()
         # 이렇게 전체 오디오를 한 번에 넣으면 모델이 뻗어버림.
         # 공식 API인 get_speech_timestamps를 써서 내부적으로 안전하게 청킹 처리!
-        timestamps = get_speech_timestamps(audio_tensor, model, sampling_rate=VAD_SAMPLE_RATE)
+        timestamps = get_speech_timestamps(
+            audio_tensor, model,
+            sampling_rate=VAD_SAMPLE_RATE,
+            threshold=VAD_THRESHOLD,  # config.py 설정값 전달 (MED-1 fix)
+        )
 
         has_speech = len(timestamps) > 0
 
@@ -100,8 +105,28 @@ def detect_speech(audio_bytes: bytes) -> dict:
         logger.error(f"[VAD] 처리 실패: {e}")
         # ⚠️ 학생다운 현실적 타협: VAD에서 에러가 나면 서버가 뻗지 않도록
         # 무조건 음성이 있다고(True) 간주하고 STT로 넘겨버림 (Fallback)
+        # FATAL-3 fix: audio_float 변환 자체가 실패했으면 원본 bytes로 재시도
+        fallback_audio = None
+        if 'audio_float' in locals():
+            fallback_audio = audio_float
+        else:
+            try:
+                fallback_audio = bytes_to_float32(audio_bytes)
+            except Exception:
+                pass  # 이것마저 실패하면 None → websockets.py에서 처리
         return {
             "has_speech": True,
-            "speech_audio": audio_float if 'audio_float' in locals() else None,
+            "speech_audio": fallback_audio,
             "confidence": 0.0,
         }
+
+
+async def detect_speech_async(audio_bytes: bytes) -> dict:
+    """
+    ✅ 비동기 VAD - WebSocket 핸들러에서는 이걸 사용!!
+
+    # FATAL-1 fix: detect_speech()는 동기 함수라서
+    # async 핸들러에서 직접 호출하면 이벤트 루프 블로킹됨
+    # → STT/LLM처럼 run_in_threadpool로 감싸야 함
+    """
+    return await run_in_threadpool(detect_speech, audio_bytes)
