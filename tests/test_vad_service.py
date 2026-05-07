@@ -8,7 +8,7 @@ from app.services.vad_service import _collect_speech_audio
 
 
 class VADServiceTest(unittest.TestCase):
-    def test_collect_speech_audio_keeps_only_timestamp_windows(self):
+    def test_collect_speech_audio_keeps_only_timestamp_ranges(self):
         audio = np.arange(20000, dtype=np.float32)
         timestamps = [{"start": 5000, "end": 6000}, {"start": 12000, "end": 13000}]
 

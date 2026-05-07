@@ -1,6 +1,6 @@
 """
 app/api/vision.py - 스냅샷 이미지 분석 라우터
-키오스크 시작 시점에 프론트엔드가 보낸 사진으로 고령자 UI 전환 여부를 판단한다.
+키오스크 시작 시점에 프론트가 보낸 사진으로 고령자 UI 전환 여부를 본다.
 """
 import logging
 
@@ -39,8 +39,8 @@ def _error_response(message: str) -> AgeAnalysisResponse:
 @router.post("/analyze_age", response_model=AgeAnalysisResponse)
 async def analyze_age_snapshot(file: UploadFile = File(...)):
     """
-    DeepFace 스냅샷 연령 추정 엔드포인트.
-    이미지는 저장하지 않고 요청 단위 메모리에서만 처리한다.
+    DeepFace로 스냅샷 나이를 추정한다.
+    이미지는 파일로 저장하지 않고 메모리에서만 처리한다.
     """
     if file.content_type and file.content_type not in SUPPORTED_IMAGE_TYPES:
         await file.close()

@@ -14,7 +14,7 @@ load_dotenv(BASE_DIR / ".env")
 
 
 def configure_console_encoding() -> None:
-    """Windows 콘솔 인코딩 차이로 한글 로그 출력이 실패하지 않도록 보정한다."""
+    """한글 로그가 깨지는 환경이 있어서 stdout/stderr를 utf-8로 맞춘다."""
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         reconfigure = getattr(stream, "reconfigure", None)
@@ -34,17 +34,24 @@ def _get_bool_env(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+# --- GPU 사용 설정 ---
+# true이면 STT/DeepFace가 GPU를 잡지 않게 CPU 쪽으로 고정한다.
+DISABLE_GPU = _get_bool_env("DISABLE_GPU", "false")
+if DISABLE_GPU:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+
 # --- STT 설정 ---
 # faster-whisper 모델 사이즈 (base가 속도/정확도 밸런스 젤 나음)
 # large-v3 쓰면 정확한데 CPU에서 너무 느려서 base로 타협함...
 WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
 
 # device: cpu / cuda (학교 서버에 GPU 없어서 cpu 기본)
-WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+WHISPER_DEVICE = "cpu" if DISABLE_GPU else os.getenv("WHISPER_DEVICE", "cpu")
 
 # compute type: int8이 cpu에서 제일 빠름
-# float16은 GPU 전용이라 cpu에서 쓰면 에러남 ㅋㅋ
-WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+# float16은 GPU용이라 CPU에서 쓰면 에러가 난다.
+WHISPER_COMPUTE_TYPE = "int8" if DISABLE_GPU else os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 
 # STT 언어 (한국어 고정)
 STT_LANGUAGE = "ko"

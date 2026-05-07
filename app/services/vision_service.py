@@ -1,6 +1,6 @@
 """
 app/services/vision_service.py - DeepFace 기반 스냅샷 연령 추정
-프론트엔드가 보내는 키오스크 시작 스냅샷을 저장하지 않고 메모리에서 바로 분석한다.
+프론트가 보내는 키오스크 시작 스냅샷을 저장하지 않고 바로 분석한다.
 """
 import io
 import logging
@@ -46,7 +46,7 @@ def _build_age_payload(age: int) -> dict:
 
 
 def _decode_image_bytes(image_bytes: bytes) -> np.ndarray:
-    """업로드 이미지를 RGB ndarray로 변환한다. 원본 파일은 디스크에 저장하지 않는다."""
+    """업로드 이미지를 RGB ndarray로 바꾼다. 원본 파일은 저장하지 않는다."""
     if not image_bytes:
         raise VisionAnalysisError("빈 이미지 파일입니다.")
 
@@ -73,7 +73,7 @@ def _decode_image_bytes(image_bytes: bytes) -> np.ndarray:
 
 
 def _get_deepface():
-    """DeepFace 모듈과 age 모델을 lazy loading한다."""
+    """DeepFace 모듈과 age 모델을 처음 필요할 때 로드한다."""
     global _deepface, _age_model_ready, _age_model_error
 
     if _deepface is not None and _age_model_ready:
@@ -112,7 +112,7 @@ def _get_deepface():
 
 
 def _extract_age(deepface_result: Any) -> int:
-    """DeepFace 버전에 따라 dict 또는 list로 오는 결과에서 age 값을 꺼낸다."""
+    """DeepFace 결과가 dict/list 어느 쪽으로 오든 age 값만 꺼낸다."""
     result = deepface_result[0] if isinstance(deepface_result, list) else deepface_result
     if not isinstance(result, dict) or "age" not in result:
         raise VisionAnalysisError("DeepFace 응답에서 age 값을 찾지 못했습니다.")
@@ -162,7 +162,7 @@ def _run_deepface_age(image_bytes: bytes) -> dict:
 
 
 def warm_up_deepface() -> None:
-    """서버 시작 시 옵션으로 DeepFace age 모델을 미리 로딩한다."""
+    """설정이 켜져 있으면 서버 시작 때 DeepFace age 모델을 미리 올린다."""
     logger.info("[Vision] DeepFace age 모델 워밍업 시작")
     deepface = _get_deepface()
     dummy = np.zeros((64, 64, 3), dtype=np.uint8)
@@ -178,5 +178,5 @@ def warm_up_deepface() -> None:
 
 
 async def analyze_age(image_bytes: bytes) -> dict:
-    """DeepFace 추론은 무거우므로 FastAPI 이벤트 루프 밖에서 실행한다."""
+    """DeepFace 추론은 무거워서 threadpool에서 실행한다."""
     return await run_in_threadpool(_run_deepface_age, image_bytes)

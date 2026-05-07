@@ -61,6 +61,45 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(items[0].menu_id, "cola_01")
         self.assertEqual(items[0].quantity, 2)
 
+    def test_keyword_fallback_handles_multi_digit_quantity_after_menu(self):
+        cases = {
+            "콜라 12개 주세요": 12,
+            "콜라 20개 주세요": 20,
+        }
+
+        for text, expected_quantity in cases.items():
+            with self.subTest(text=text):
+                items = _fallback_keyword_parse(text, log_result=False)
+
+                self.assertEqual(len(items), 1)
+                self.assertEqual(items[0].menu_id, "cola_01")
+                self.assertEqual(items[0].quantity, expected_quantity)
+
+    def test_keyword_fallback_handles_multi_digit_quantity_before_menu(self):
+        cases = {
+            "12개 콜라 주세요": 12,
+            "20개 콜라 주세요": 20,
+        }
+
+        for text, expected_quantity in cases.items():
+            with self.subTest(text=text):
+                items = _fallback_keyword_parse(text, log_result=False)
+
+                self.assertEqual(len(items), 1)
+                self.assertEqual(items[0].menu_id, "cola_01")
+                self.assertEqual(items[0].quantity, expected_quantity)
+
+    def test_keyword_fallback_rejects_out_of_range_multi_digit_quantity(self):
+        cases = [
+            "콜라 21개 주세요",
+            "21개 콜라 주세요",
+        ]
+
+        for text in cases:
+            with self.subTest(text=text):
+                with self.assertRaises(LLMResponseValidationError):
+                    _fallback_keyword_parse(text, log_result=False)
+
     def test_keyword_fallback_merges_repeated_menu_mentions(self):
         items = _fallback_keyword_parse("콜라 하나 콜라 두 개 주세요", log_result=False)
 

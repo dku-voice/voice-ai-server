@@ -1,9 +1,12 @@
 FROM python:3.11-slim
 
+ARG DISABLE_GPU=false
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     PYTHONUTF8=1 \
+    DISABLE_GPU=${DISABLE_GPU} \
     TF_ENABLE_ONEDNN_OPTS=0
 
 WORKDIR /app
@@ -15,9 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     ffmpeg
 
-COPY requirements.txt .
+COPY requirements.txt requirements-linux-cpu.txt ./
 RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir -r requirements.txt
+    && if [ "$DISABLE_GPU" = "false" ]; then \
+        python -m pip install --no-cache-dir -r requirements-linux-cpu.txt; \
+    else \
+        python -m pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 COPY app ./app
 COPY main.py .

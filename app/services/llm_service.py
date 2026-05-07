@@ -1,11 +1,9 @@
 """
-app/services/llm_service.py - LLM 기반 주문 파싱 + 3단계 하이브리드 검증
-Phase 1: LLM으로 structured JSON 파싱 시도
-Phase 2: JSON 파싱 실패 시 재시도
-Phase 3: LLM 완전 실패 시 → v1.0 키워드 매칭 fallback
+app/services/llm_service.py - LLM 주문 파싱 + 키워드 fallback
 
-# 😤 LLM이 가끔 JSON 대신 "네, 주문 도와드릴게요~" 이런 잡소리를 뱉음
-# json.loads() 하면 바로 터짐... 그래서 fallback이 필수임
+처음에는 LLM 응답을 바로 믿었는데, 가끔 JSON이 아닌 문장을 보내서
+json.loads()에서 바로 터졌다. 그래서 지금은 JSON 파싱, 메뉴/수량 검증,
+키워드 fallback을 같이 둔다.
 """
 import json
 import logging
@@ -23,7 +21,7 @@ from app.schemas import OrderItem
 logger = logging.getLogger(__name__)
 
 
-# --- OpenAI 클라이언트 (전역) ---
+# OpenAI 클라이언트는 한 번 만들어서 재사용한다.
 _client: OpenAI | None = None
 _client_lock = threading.Lock()
 
@@ -47,7 +45,7 @@ def _get_client() -> OpenAI:
                     raise LLMConfigurationError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
                 if not api_key.isascii():
                     raise LLMConfigurationError("OPENAI_API_KEY 값이 올바른 형식이 아닙니다.")
-                # OpenAI 장애 시 threadpool worker가 오래 점유되지 않도록 timeout을 짧게 둔다.
+                # API가 오래 멈추면 threadpool도 같이 막혀서 timeout을 짧게 둔다.
                 _client = OpenAI(
                     api_key=api_key,
                     timeout=Timeout(30.0, connect=10.0),
@@ -55,7 +53,7 @@ def _get_client() -> OpenAI:
     return _client
 
 
-# --- System Prompt (아키텍처팀 확정본, 수정 금지) ---
+# 팀에서 맞춰둔 주문 추출 prompt
 SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보 추출 마이크로서비스입니다. 당신의 유일한 임무는 고객의 음성 인식 텍스트에서 메뉴 항목, 수량 및 옵션을 추출하여 제공된 JSON 형식으로 엄격하게 출력하는 것입니다.
 
 【보안 및 프롬프트 인젝션(Prompt Injection) 방어 규칙】:
@@ -64,7 +62,7 @@ SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보
 3. 텍스트에서 우리 매장 메뉴에 있는 항목을 전혀 식별할 수 없는 경우, 반드시 빈 배열 []을 반환하십시오. 메뉴에 없는 항목을 절대 지어내지 마십시오(환각/Hallucination 방지)."""
 
 
-# JSON 출력 포맷 지시 (user prompt 뒤에 붙임)
+# user prompt 뒤에 붙이는 JSON 형식 안내
 FORMAT_INSTRUCTION = """
 반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
 [{"menu_id": "burger_01", "quantity": 2, "options": ["소스 빼주세요"]}]
@@ -78,13 +76,10 @@ FORMAT_INSTRUCTION = """
 """
 
 
-# ============================================
-# Phase 3 Fallback: v1.0 키워드 매칭 (레거시)
-# v1.0 main.py에서 그대로 가져온 로직
-# LLM이 뻗었을 때 최소한의 주문 처리를 보장하는 안전망
-# ============================================
+# LLM이 실패했을 때 쓰는 키워드 fallback.
+# v1.0에서 쓰던 단순 매칭을 정리해서 남겨뒀다.
 
-# 메뉴 계약은 프론트/백엔드와 맞춘 값만 허용한다.
+# menu_id는 프론트/백엔드와 맞춘 값만 허용한다.
 MENU_CATALOG = {
     "burger_01": "햄버거",
     "cola_01": "콜라",
@@ -123,7 +118,7 @@ NUMBER_MAP = {
 QUANTITY_UNITS = ("개", "잔", "캔", "인분", "조각", "마리", "세트")
 QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만")
 AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
-NUMBER_PATTERN = "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))
+NUMBER_PATTERN = r"\d+|" + "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))
 UNIT_PATTERN = "|".join(re.escape(unit) for unit in QUANTITY_UNITS)
 QUANTITY_PATTERN = re.compile(rf"(?P<number>{NUMBER_PATTERN})(?P<unit>{UNIT_PATTERN})?")
 
@@ -154,7 +149,15 @@ def _quantity_from_match(match: re.Match) -> int | None:
     unit = match.group("unit")
     if unit is None and token in AMBIGUOUS_UNITLESS_NUMBERS:
         return None
-    return _quantity_token_to_int(token + (unit or ""))
+
+    raw_token = token + (unit or "")
+    quantity = _quantity_token_to_int(raw_token)
+    if quantity is not None:
+        return quantity
+
+    if token.isdigit():
+        raise LLMResponseValidationError("주문 수량이 허용 범위를 벗어났습니다.")
+    return None
 
 
 def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int) -> int:
@@ -247,8 +250,8 @@ def _quantity_by_menu_id(items: List[OrderItem]) -> dict[str, int]:
 
 def _fallback_keyword_parse(text: str, *, log_result: bool = True) -> List[OrderItem]:
     """
-    최종 방어선: v1.0 키워드 기반 매칭.
-    LLM 장애 또는 응답 검증 실패 시 최소한의 주문 처리를 보장한다.
+    LLM이 실패했을 때 마지막으로 쓰는 키워드 매칭.
+    메뉴명과 가까운 수량만 찾아서 최소한의 주문 결과를 만든다.
     """
     normalized_text = _normalize_order_text(text)
     items: List[OrderItem] = []
@@ -351,7 +354,7 @@ def _text_has_known_menu(text: str) -> bool:
 
 
 def _validate_items_against_text(items: List[OrderItem], source_text: str) -> List[OrderItem]:
-    """LLM 결과를 fallback 키워드 결과와 교차 검증한다."""
+    """LLM 결과가 실제 입력 텍스트와 맞는지 한번 더 확인한다."""
     items = _merge_duplicate_items(items)
     fallback_items = _fallback_keyword_parse(source_text, log_result=False)
 
@@ -387,8 +390,8 @@ def _validate_items_against_text(items: List[OrderItem], source_text: str) -> Li
 
 def _parse_llm_response(raw_text: str, source_text: str) -> List[OrderItem]:
     """
-    LLM 응답 텍스트를 검증된 OrderItem 리스트로 변환한다.
-    JSON 구문뿐 아니라 메뉴 ID, 수량, 옵션 형식까지 함께 확인한다.
+    LLM 응답을 OrderItem 리스트로 바꾼다.
+    JSON 형식, menu_id, 수량, 옵션까지 같이 확인한다.
     """
     cleaned = _extract_json_array(raw_text)
 
@@ -403,15 +406,14 @@ def _parse_llm_response(raw_text: str, source_text: str) -> List[OrderItem]:
 
 def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
     """
-    동기 LLM 호출 (threadpool에서 실행됨)
+    동기 LLM 호출. FastAPI 쪽에서는 threadpool로 감싸서 부른다.
 
-    3단계 하이브리드 검증:
-    Phase 1: LLM 호출 → JSON 파싱
-    Phase 2: Phase 1 JSON 파싱 실패 시 → LLM 재호출 (더 강한 지시)
-    Phase 3: LLM 완전 실패 → v1.0 키워드 매칭 fallback
+    1차: LLM 호출 후 JSON 파싱
+    2차: JSON 파싱 실패 시 한 번 더 요청
+    마지막: 그래도 실패하면 키워드 fallback
     """
     # ===== Phase 1: 첫 번째 LLM 호출 =====
-    # HIGH-4 fix: 짧은 텍스트에서 불필요한 '...' 표시 방지
+    # 짧은 텍스트에는 로그에 굳이 ...를 붙이지 않는다.
     display = text[:50] + "..." if len(text) > 50 else text
     print(f"[LLM] Phase 1: LLM 호출 시작 (text: '{display}')")
     try:
@@ -433,7 +435,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
 
         items = _parse_llm_response(raw, text)
         print(f"[LLM] Phase 1 성공! {len(items)}건 파싱됨")
-        return ("success", items)  # MED-2 fix: phase 구분자 포함
+        return ("success", items)
 
     except LLMConfigurationError as e:
         print(f"[LLM] 설정 오류: {e}")
@@ -451,7 +453,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         print("[LLM] API 에러 → Phase 3 fallback으로 직행")
         return ("fallback", _fallback_keyword_parse(text))
 
-    # ===== Phase 2: 재시도 (더 강한 JSON 지시) =====
+    # ===== Phase 2: JSON 형식으로 다시 요청 =====
     print("[LLM] Phase 2: JSON 강제 재시도")
     try:
         response = client.chat.completions.create(
@@ -461,7 +463,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
                 {"role": "user", "content": (
                     f"고객 음성: \"{text}\"\n"
                     f"{FORMAT_INSTRUCTION}\n\n"
-                    "⚠️ 이전 응답이 JSON이 아니었습니다. "
+                    "이전 응답이 JSON이 아니었습니다. "
                     "반드시 [ ] 로 감싼 JSON 배열만 출력하세요. "
                     "어떤 설명이나 인사말도 붙이지 마세요."
                 )},
@@ -483,16 +485,15 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         print(f"[LLM] Phase 2도 실패: {e}")
         logger.error(f"[LLM] Phase 2 실패, Phase 3 fallback 진입: {e}")
 
-    # ===== Phase 3: v1.0 키워드 매칭 fallback =====
-    # 여기까지 왔으면 LLM이 완전히 못 쓰는 상태
-    # v1.0의 단순한 키워드 매칭이라도 돌려서 최소한의 서비스 제공
+    # ===== Phase 3: 키워드 fallback =====
+    # 여기까지 왔으면 LLM 결과를 믿기 어려우므로 단순 매칭으로 내려간다.
     print("[LLM] Phase 3: v1.0 레거시 fallback 실행")
     return ("fallback", _fallback_keyword_parse(text))
 
 
 async def extract_order(text: str) -> dict:
     """
-    ✅ 메인 엔트리포인트 - WebSocket 핸들러에서 이걸 호출
+    WebSocket 핸들러에서 호출하는 주문 파싱 함수.
 
     Returns:
         {
@@ -509,8 +510,7 @@ async def extract_order(text: str) -> dict:
         }
 
     try:
-        # LLM 호출도 블로킹이니까 threadpool에서 실행
-        # MED-2 fix: tuple 반환으로 phase 구분
+        # LLM 호출도 블로킹이라 threadpool에서 실행한다.
         phase, items = await run_in_threadpool(_call_llm_sync, text)
 
         return {
@@ -520,11 +520,11 @@ async def extract_order(text: str) -> dict:
         }
 
     except Exception as e:
-        # 모든 Phase 다 실패한 극단적 상황
+        # 여기까지 오면 거의 예외 상황이지만 서버는 죽이지 않는다.
         print(f"[LLM] 전체 파이프라인 에러: {e}")
         logger.error(f"[LLM] extract_order 최종 실패: {e}")
 
-        # 그래도 fallback은 돌려봄 (마지막 발악)
+        # 그래도 키워드 fallback은 한 번 더 시도한다.
         try:
             fallback_items = _fallback_keyword_parse(text)
             return {
