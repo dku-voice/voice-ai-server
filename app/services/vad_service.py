@@ -6,7 +6,8 @@ v2.0에선 말하는 구간만 잘라서 STT에 넘김
 import numpy as np
 import torch
 import logging
-from silero_vad import get_speech_timestamps  # 🚨 안전한 청킹(Chunking) 처리를 위해 추가
+import threading
+from silero_vad import get_speech_timestamps, load_silero_vad
 from starlette.concurrency import run_in_threadpool
 
 from app.config import VAD_THRESHOLD, VAD_SAMPLE_RATE
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 # Silero VAD 모델 (전역 싱글톤)
 _vad_model = None
+_vad_model_lock = threading.Lock()
+SPEECH_PADDING_MS = 120
 
 
 def _load_vad_model():
@@ -29,14 +32,31 @@ def _load_vad_model():
     if _vad_model is not None:
         return _vad_model
 
-    print("[VAD] Silero VAD 모델 로딩 중...")
-    _vad_model, _ = torch.hub.load(
-        repo_or_dir="snakers4/silero-vad",
-        model="silero_vad",
-        trust_repo=True,
-    )
-    print("[VAD] 모델 로딩 완료!")
+    with _vad_model_lock:
+        if _vad_model is not None:
+            return _vad_model
+
+        print("[VAD] Silero VAD 모델 로딩 중...")
+        _vad_model = load_silero_vad()
+        print("[VAD] 모델 로딩 완료!")
     return _vad_model
+
+
+def _collect_speech_audio(audio_float: np.ndarray, timestamps: list[dict]) -> np.ndarray:
+    """VAD가 찾은 구간만 STT에 넘기도록 잘라낸다."""
+    padding = int(VAD_SAMPLE_RATE * SPEECH_PADDING_MS / 1000)
+    chunks = []
+
+    for timestamp in timestamps:
+        start = max(0, int(timestamp["start"]) - padding)
+        end = min(len(audio_float), int(timestamp["end"]) + padding)
+        if start < end:
+            chunks.append(audio_float[start:end])
+
+    if not chunks:
+        return audio_float
+
+    return np.concatenate(chunks).astype(np.float32, copy=False)
 
 
 def bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
@@ -64,9 +84,8 @@ def detect_speech(audio_bytes: bytes) -> dict:
             "confidence": float
         }
     """
-    model = _load_vad_model()
-
     try:
+        model = _load_vad_model()
         audio_float = bytes_to_float32(audio_bytes)
 
         # Silero VAD는 16kHz만 됨 (8kHz, 48kHz 넣으면 이상한 결과 나옴)
@@ -88,6 +107,8 @@ def detect_speech(audio_bytes: bytes) -> dict:
         # 타임스탬프 방식은 전체 오디오의 confidence를 주지 않으므로 임의값 할당
         confidence = 0.99 if has_speech else 0.0
 
+        speech_audio = _collect_speech_audio(audio_float, timestamps) if has_speech else None
+
         if has_speech:
             logger.info(f"[VAD] 음성 감지됨! (구간 수: {len(timestamps)}개)")
         else:
@@ -95,7 +116,7 @@ def detect_speech(audio_bytes: bytes) -> dict:
 
         return {
             "has_speech": has_speech,
-            "speech_audio": audio_float if has_speech else None,
+            "speech_audio": speech_audio,
             "confidence": confidence,
         }
 

@@ -6,10 +6,11 @@ VAD → STT → LLM 파이프라인을 거쳐 주문 결과를 JSON으로 응답
 v1.0: HTTP POST로 파일 통째로 업로드 → 느림 + 서버 블로킹
 v2.0: WebSocket으로 스트리밍 → 빠름 + 비동기 처리
 """
+import asyncio
 import logging
-import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.config import WS_RECEIVE_TIMEOUT_SECONDS
 from app.schemas import VoiceOrderResponse
 from app.services.vad_service import detect_speech_async, bytes_to_float32
 from app.services.stt_service import transcribe
@@ -21,6 +22,43 @@ router = APIRouter()
 
 # HIGH-3 fix: 오디오 버퍼 최대 크기 (10MB ≈ 약 5분 16kHz 16bit mono)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+RAW_PCM_FORMAT_ERROR = (
+    "지원하지 않는 오디오 형식입니다. "
+    "raw PCM 16kHz mono 16-bit little-endian으로 전송하세요."
+)
+
+UNSUPPORTED_AUDIO_HEADERS = {
+    b"RIFF": "WAV",
+    b"OggS": "Ogg/Opus",
+    b"\x1A\x45\xDF\xA3": "WebM/Matroska",
+    b"ID3": "MP3",
+    b"fLaC": "FLAC",
+}
+
+
+def _detect_unsupported_audio_container(audio_bytes: bytes) -> str | None:
+    """raw PCM이 아닌 대표적인 컨테이너 포맷을 빠르게 감지한다."""
+    for header, format_name in UNSUPPORTED_AUDIO_HEADERS.items():
+        if audio_bytes.startswith(header):
+            return format_name
+
+    if len(audio_bytes) >= 12 and audio_bytes[4:8] == b"ftyp":
+        return "MP4/M4A"
+
+    return None
+
+
+def _validate_raw_pcm_audio(audio_bytes: bytes) -> str | None:
+    """VAD/STT에 넘기기 전 raw PCM 최소 조건을 검증한다."""
+    container = _detect_unsupported_audio_container(audio_bytes)
+    if container:
+        return f"{RAW_PCM_FORMAT_ERROR} 감지된 형식: {container}"
+
+    if len(audio_bytes) % 2 != 0:
+        return "PCM 16-bit 오디오는 바이트 길이가 짝수여야 합니다."
+
+    return None
 
 
 @router.websocket("/ws/audio")
@@ -46,9 +84,26 @@ async def audio_websocket(ws: WebSocket):
             # 프론트에서 녹음하면서 chunk 단위로 계속 보냄
             # "END" 메시지가 오면 녹음 끝난 거임
             audio_buffer = bytearray()
+            buffer_overflowed = False
 
             while True:
-                data = await ws.receive()
+                try:
+                    data = await asyncio.wait_for(
+                        ws.receive(),
+                        timeout=WS_RECEIVE_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[WS] 수신 timeout: {WS_RECEIVE_TIMEOUT_SECONDS}초 동안 메시지 없음")
+                    await ws.send_json(
+                        VoiceOrderResponse(
+                            status="error",
+                            recognized_text="",
+                            items=[],
+                            error_msg="오디오 수신 시간이 초과되었습니다. 다시 시도하세요.",
+                        ).model_dump()
+                    )
+                    await ws.close(code=1008)
+                    return
 
                 # FATAL-2 fix: 연결 종료 메시지 감지
                 # ws.receive()는 disconnect 시 예외를 던지지 않고
@@ -83,20 +138,39 @@ async def audio_websocket(ws: WebSocket):
                             ).model_dump()
                         )
                         audio_buffer.clear()
+                        buffer_overflowed = True
                         break
 
                     continue
 
-            # 버퍼가 비었으면 스킵 (overflow clear 포함)
+            # 버퍼가 비었으면 즉시 응답해서 클라이언트가 대기 상태에 빠지지 않게 한다.
             if len(audio_buffer) == 0:
-                # overflow로 clear된 경우는 이미 에러 응답 보냄 → 중복 방지
-                # END 직후 빈 버퍼인 경우만 에러 응답
-                if not (data.get("type") == "websocket.disconnect"):
-                    print("[WS] 빈 오디오 버퍼, 스킵")
-                    # overflow clear 후에는 이미 에러 보냈으므로 다시 안 보냄
+                if buffer_overflowed:
+                    continue
+                print("[WS] 빈 오디오 버퍼, 빈 주문 응답")
+                await ws.send_json(
+                    VoiceOrderResponse(
+                        status="success",
+                        recognized_text="",
+                        items=[],
+                        error_msg=None,
+                    ).model_dump()
+                )
                 continue
 
             audio_bytes = bytes(audio_buffer)
+            audio_error = _validate_raw_pcm_audio(audio_bytes)
+            if audio_error:
+                print(f"[WS] 지원하지 않는 오디오 입력: {audio_error}")
+                await ws.send_json(
+                    VoiceOrderResponse(
+                        status="error",
+                        recognized_text="",
+                        items=[],
+                        error_msg=audio_error,
+                    ).model_dump()
+                )
+                continue
 
             # ===== Stage 1: VAD (음성 감지) =====
             print("[WS] Stage 1: VAD 처리 중...")

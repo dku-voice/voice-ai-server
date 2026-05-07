@@ -20,3 +20,12 @@ class VoiceOrderResponse(BaseModel):
     recognized_text: str = Field(..., description="STT가 인식한 원본 고객 음성 텍스트")
     items: List[OrderItem] = Field(default=[], description="파싱된 최종 주문 항목 리스트")
     error_msg: Optional[str] = Field(default=None, description="에러 발생 시 상세 메시지")
+
+
+class AgeAnalysisResponse(BaseModel):
+    """스냅샷 이미지 기반 연령 추정 결과"""
+    status: str = Field(..., description="처리 상태: 'success' | 'error'")
+    estimated_age: Optional[int] = Field(default=None, description="DeepFace가 추정한 나이")
+    age_group: str = Field(default="unknown", description="'child' | 'adult' | 'senior' | 'unknown'")
+    is_senior: bool = Field(default=False, description="고령자 UI 전환이 필요한지 여부")
+    error_msg: Optional[str] = Field(default=None, description="에러 발생 시 상세 메시지")

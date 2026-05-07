@@ -10,8 +10,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.vision import router as vision_router
 from app.api.websockets import router as ws_router
+from app.config import VISION_WARMUP_ON_STARTUP
+from app.services.stt_service import get_model_status as get_stt_model_status
 from app.services.stt_service import load_model as load_stt_model
+from app.services.vision_service import warm_up_deepface
 
 
 # --- 로깅 설정 (학생 수준으로 간단하게) ---
@@ -36,10 +40,34 @@ async def lifespan(app: FastAPI):
 
     # STT 모델 로딩 (서버 시작 시 한 번만)
     print("[Startup] STT 모델 로딩 중...")
-    load_stt_model()
+    try:
+        load_stt_model()
+        app.state.stt_ready = True
+        app.state.stt_error = None
+    except Exception as e:
+        app.state.stt_ready = False
+        app.state.stt_error = str(e)
+        logger.error("[Startup] STT 모델 로딩 실패. 서버는 degraded 상태로 계속 실행됩니다: %s", e, exc_info=True)
+        print("[Startup] STT 모델 로딩 실패. /ws/audio 요청 시 STT 단계에서 에러를 반환합니다.")
 
-    # VAD 모델은 첫 호출 시 lazy loading (torch.hub.load가 좀 오래 걸림)
+    # VAD 모델은 첫 호출 시 lazy loading
     print("[Startup] VAD 모델은 첫 요청 시 로딩됨 (lazy)")
+
+    if VISION_WARMUP_ON_STARTUP:
+        print("[Startup] DeepFace 연령 추정 모델 워밍업 중...")
+        try:
+            warm_up_deepface()
+            app.state.vision_ready = True
+            app.state.vision_error = None
+        except Exception as e:
+            app.state.vision_ready = False
+            app.state.vision_error = str(e)
+            logger.warning("[Startup] DeepFace 모델 워밍업 실패. 연령 추정 기능은 요청 시 에러를 반환합니다: %s", e)
+            print("[Startup] DeepFace 워밍업 실패. /api/vision 요청 시 에러를 반환합니다.")
+    else:
+        app.state.vision_ready = False
+        app.state.vision_error = None
+        print("[Startup] DeepFace 모델은 첫 vision 요청 시 로딩됨 (lazy)")
 
     print("[Startup] 서버 준비 완료! ✅")
     print("=" * 50)
@@ -61,6 +89,7 @@ app = FastAPI(
 
 # --- WebSocket 라우터 등록 ---
 app.include_router(ws_router)
+app.include_router(vision_router)
 
 
 # ============================================
@@ -91,12 +120,21 @@ async def process_voice_legacy():
 @app.get("/")
 def health_check():
     """서버 생존 확인용 (프론트/백엔드 연결 테스트)"""
+    stt_status = get_stt_model_status()
     return {
         "message": "Voice AI Server v2.0 is running",
         "version": "2.0.0",
         "endpoints": {
             "websocket": "/ws/audio",
+            "vision_age": "/api/vision/analyze_age",
             "legacy_http": "/api/voice (deprecated)",
+        },
+        "models": {
+            "stt_ready": stt_status["ready"],
+            "stt_error": stt_status["error"],
+            "vision_warmup_on_startup": VISION_WARMUP_ON_STARTUP,
+            "vision_ready": getattr(app.state, "vision_ready", False),
+            "vision_error": getattr(app.state, "vision_error", None),
         },
     }
 

@@ -16,6 +16,11 @@ import wave
 
 import websockets
 
+from app.config import configure_console_encoding
+
+
+configure_console_encoding()
+
 
 # --- 설정 ---
 WS_URL = "ws://localhost:8000/ws/audio"

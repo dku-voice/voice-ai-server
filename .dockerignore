@@ -1,0 +1,15 @@
+.env
+.git
+.github
+__pycache__
+*/__pycache__
+*.pyc
+venv
+venv311
+test.jpg
+test.png
+test.wav
+*.zip
+AGENTS.md
+README.md
+tests

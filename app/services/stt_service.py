@@ -11,6 +11,7 @@ v1.0의 openai-whisper에서 faster-whisper(CTranslate2)로 교체
 import numpy as np
 import logging
 import io
+import threading
 import soundfile as sf
 from faster_whisper import WhisperModel
 from starlette.concurrency import run_in_threadpool
@@ -30,6 +31,8 @@ logger = logging.getLogger(__name__)
 # 서버 시작할 때 한 번만 로드 (매 요청마다 로드하면 메모리 터짐)
 # ============================================
 _whisper_model: WhisperModel | None = None
+_whisper_model_error: str | None = None
+_whisper_model_lock = threading.Lock()
 
 
 def load_model():
@@ -37,27 +40,53 @@ def load_model():
     서버 startup 시 호출 - 모델을 전역으로 올림
     main.py (혹은 app factory)에서 lifespan으로 호출해야 함
     """
-    global _whisper_model
+    global _whisper_model, _whisper_model_error
     if _whisper_model is not None:
         print("[STT] 모델 이미 로딩되어 있음, skip")
         return
 
-    print(f"[STT] faster-whisper 모델 로딩: size={WHISPER_MODEL_SIZE}, "
-          f"device={WHISPER_DEVICE}, compute={WHISPER_COMPUTE_TYPE}")
+    with _whisper_model_lock:
+        if _whisper_model is not None:
+            print("[STT] 모델 이미 로딩되어 있음, skip")
+            return
 
-    _whisper_model = WhisperModel(
-        WHISPER_MODEL_SIZE,
-        device=WHISPER_DEVICE,
-        compute_type=WHISPER_COMPUTE_TYPE,
-    )
-    print("[STT] 모델 로딩 완료!")
+        print(f"[STT] faster-whisper 모델 로딩: size={WHISPER_MODEL_SIZE}, "
+              f"device={WHISPER_DEVICE}, compute={WHISPER_COMPUTE_TYPE}")
+
+        try:
+            _whisper_model = WhisperModel(
+                WHISPER_MODEL_SIZE,
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE_TYPE,
+            )
+        except Exception as e:
+            _whisper_model_error = str(e)
+            logger.error(f"[STT] 모델 로딩 실패: {e}", exc_info=True)
+            raise
+
+        _whisper_model_error = None
+        print("[STT] 모델 로딩 완료!")
 
 
 def _get_model() -> WhisperModel:
     """모델 가져오기 (없으면 에러)"""
     if _whisper_model is None:
-        raise RuntimeError("[STT] 모델이 로딩 안 됨! 서버 startup에서 load_model() 호출 필요")
+        try:
+            load_model()
+        except Exception as e:
+            detail = _whisper_model_error or str(e)
+            raise RuntimeError(f"[STT] 모델 로딩 실패: {detail}") from e
+    if _whisper_model is None:
+        raise RuntimeError("[STT] 모델 로딩 상태가 올바르지 않습니다.")
     return _whisper_model
+
+
+def get_model_status() -> dict:
+    """헬스체크에서 사용할 STT 모델 상태를 반환한다."""
+    return {
+        "ready": _whisper_model is not None,
+        "error": _whisper_model_error,
+    }
 
 
 def _transcribe_sync(audio_data: np.ndarray) -> str:
