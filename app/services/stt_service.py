@@ -62,7 +62,7 @@ def load_model():
             )
         except Exception as e:
             _whisper_model_error = str(e)
-            logger.error(f"[STT] 모델 로딩 실패: {e}", exc_info=True)
+            logger.error("[STT] 모델 로딩 실패: %s", e, exc_info=True)
             raise
 
         _whisper_model_error = None
@@ -115,7 +115,12 @@ def _transcribe_sync(audio_data: np.ndarray) -> str:
 
     result_text = " ".join(text_parts).strip()
 
-    logger.info(f"[STT] 인식 결과: '{result_text}' (lang={info.language}, prob={info.language_probability:.2f})")
+    logger.info(
+        "[STT] 인식 결과: '%s' (lang=%s, prob=%.2f)",
+        result_text,
+        info.language,
+        info.language_probability,
+    )
     return result_text
 
 
@@ -149,5 +154,5 @@ async def transcribe_bytes(audio_bytes: bytes) -> str:
 
     except Exception as e:
         logger.warning("[STT] bytes 변환 에러: %s", e)
-        logger.error(f"[STT] transcribe_bytes 실패: {e}")
+        logger.error("[STT] transcribe_bytes 실패: %s", e)
         raise

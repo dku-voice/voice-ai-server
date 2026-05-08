@@ -250,7 +250,7 @@ async def audio_websocket(ws: WebSocket):
 
     except Exception as e:
         # 예상 못한 에러가 나도 가능하면 JSON으로 알려준다.
-        logger.error(f"[WS] 핸들러 에러: {e}", exc_info=True)
+        logger.error("[WS] 핸들러 에러: %s", e, exc_info=True)
         try:
             await ws.send_json(
                 VoiceOrderResponse(

@@ -144,6 +144,9 @@ def build_menu_documents() -> list[MenuDocument]:
     return [_profile_to_document(profile) for profile in MENU_RECOMMENDATION_PROFILES]
 
 
+_MENU_DOCUMENTS = build_menu_documents()
+
+
 def _score_document(query: str, document: MenuDocument) -> int:
     normalized_query = _normalize_text(query)
     if not normalized_query:
@@ -177,7 +180,7 @@ def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
     if not query:
         return []
 
-    documents = build_menu_documents()
+    documents = _MENU_DOCUMENTS
     scored = [
         (_score_document(query, document), index, document)
         for index, document in enumerate(documents)

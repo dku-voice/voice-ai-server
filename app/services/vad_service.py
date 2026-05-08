@@ -105,9 +105,9 @@ def detect_speech(audio_bytes: bytes) -> dict:
         speech_audio = _collect_speech_audio(audio_float, timestamps) if has_speech else None
 
         if has_speech:
-            logger.info(f"[VAD] 음성 감지됨! (구간 수: {len(timestamps)}개)")
+            logger.info("[VAD] 음성 감지됨! (구간 수: %s개)", len(timestamps))
         else:
-            logger.debug(f"[VAD] 무음 구간. (배경 소음)")
+            logger.debug("[VAD] 무음 구간. (배경 소음)")
 
         return {
             "has_speech": has_speech,

@@ -484,7 +484,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         return ("success", items)
 
     except LLMConfigurationError as e:
-        logger.warning(f"[LLM] 설정 오류, Phase 3 fallback 진입: {e}")
+        logger.warning("[LLM] 설정 오류, Phase 3 fallback 진입: %s", e)
         return ("fallback", _fallback_keyword_parse(text))
 
     except (json.JSONDecodeError, LLMResponseFormatError) as e:
@@ -495,7 +495,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         return ("fallback", _fallback_keyword_parse(text))
 
     except Exception as e:
-        logger.error(f"[LLM] Phase 1 실패: {e}")
+        logger.error("[LLM] Phase 1 실패: %s", e)
         # API 자체가 터진 거면 Phase 2도 의미 없으니 바로 Phase 3
         logger.info("[LLM] API 에러, Phase 3 fallback으로 직행")
         return ("fallback", _fallback_keyword_parse(text))
@@ -530,7 +530,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         return ("success", items)
 
     except Exception as e:
-        logger.error(f"[LLM] Phase 2 실패, Phase 3 fallback 진입: {e}")
+        logger.error("[LLM] Phase 2 실패, Phase 3 fallback 진입: %s", e)
 
     # ===== Phase 3: 키워드 fallback =====
     # 여기까지 왔으면 LLM 결과를 믿기 어려우므로 단순 매칭으로 내려간다.
@@ -568,7 +568,7 @@ async def extract_order(text: str) -> dict:
 
     except Exception as e:
         # 여기까지 오면 거의 예외 상황이지만 서버는 죽이지 않는다.
-        logger.error(f"[LLM] extract_order 최종 실패: {e}")
+        logger.error("[LLM] extract_order 최종 실패: %s", e)
 
         # 그래도 키워드 fallback은 한 번 더 시도한다.
         try:

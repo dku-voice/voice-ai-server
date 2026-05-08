@@ -110,7 +110,7 @@ async def process_voice_legacy():
 
 # 헬스체크
 @app.get("/")
-def health_check():
+async def health_check():
     """서버가 켜져 있는지 확인할 때 사용."""
     stt_status = get_stt_model_status()
     return {
