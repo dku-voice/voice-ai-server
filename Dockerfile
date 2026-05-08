@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     libsndfile1 \
-    ffmpeg
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-linux-cpu.txt ./
 RUN python -m pip install --upgrade pip \
@@ -28,6 +29,10 @@ RUN python -m pip install --upgrade pip \
 
 COPY app ./app
 COPY main.py .
+
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 

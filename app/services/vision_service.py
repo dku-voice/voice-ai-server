@@ -5,18 +5,24 @@ app/services/vision_service.py - DeepFace 기반 스냅샷 연령 추정
 import io
 import logging
 import threading
+import time
 from typing import Any
 
 import numpy as np
-from starlette.concurrency import run_in_threadpool
 
-from app.config import SENIOR_AGE_THRESHOLD, VISION_MAX_IMAGE_PIXELS
+from app.config import (
+    SENIOR_AGE_THRESHOLD,
+    VISION_MAX_IMAGE_PIXELS,
+    VISION_MODEL_RETRY_COOLDOWN_SECONDS,
+)
+from app.services.threadpool import run_model_task
 
 logger = logging.getLogger(__name__)
 
 _deepface = None
 _age_model_ready = False
 _age_model_error: str | None = None
+_age_model_retry_after = 0.0
 _age_model_lock = threading.Lock()
 
 
@@ -74,7 +80,7 @@ def _decode_image_bytes(image_bytes: bytes) -> np.ndarray:
 
 def _get_deepface():
     """DeepFace 모듈과 age 모델을 처음 필요할 때 로드한다."""
-    global _deepface, _age_model_ready, _age_model_error
+    global _deepface, _age_model_ready, _age_model_error, _age_model_retry_after
 
     if _deepface is not None and _age_model_ready:
         return _deepface
@@ -82,11 +88,20 @@ def _get_deepface():
     if _age_model_error is not None:
         raise VisionConfigurationError(f"DeepFace age 모델 로딩 이력 실패: {_age_model_error}")
 
+    now = time.monotonic()
+    if _age_model_retry_after > now:
+        wait_seconds = int(_age_model_retry_after - now) + 1
+        raise VisionConfigurationError(f"DeepFace age 모델 로딩 재시도 대기 중입니다. {wait_seconds}초 후 다시 시도하세요.")
+
     with _age_model_lock:
         if _deepface is not None and _age_model_ready:
             return _deepface
         if _age_model_error is not None:
             raise VisionConfigurationError(f"DeepFace age 모델 로딩 이력 실패: {_age_model_error}")
+        now = time.monotonic()
+        if _age_model_retry_after > now:
+            wait_seconds = int(_age_model_retry_after - now) + 1
+            raise VisionConfigurationError(f"DeepFace age 모델 로딩 재시도 대기 중입니다. {wait_seconds}초 후 다시 시도하세요.")
 
         if _deepface is None:
             try:
@@ -103,10 +118,16 @@ def _get_deepface():
                 except TypeError:
                     _deepface.build_model("Age")
             except Exception as e:
-                logger.error("[Vision] DeepFace age 모델 로딩 실패, 다음 요청에서 다시 시도합니다: %s", e)
+                _age_model_retry_after = time.monotonic() + VISION_MODEL_RETRY_COOLDOWN_SECONDS
+                logger.error(
+                    "[Vision] DeepFace age 모델 로딩 실패, %.1f초 후 다시 시도합니다: %s",
+                    VISION_MODEL_RETRY_COOLDOWN_SECONDS,
+                    e,
+                )
                 raise VisionConfigurationError("DeepFace age 모델 로딩에 실패했습니다.") from e
             _age_model_ready = True
             _age_model_error = None
+            _age_model_retry_after = 0.0
 
     return _deepface
 
@@ -159,7 +180,7 @@ def _run_deepface_age(image_bytes: bytes) -> dict:
     try:
         result = _analyze_age_image(deepface, image)
     except Exception as e:
-        logger.warning(f"[Vision] DeepFace 연령 추정 실패: {e}")
+        logger.warning("[Vision] DeepFace 연령 추정 실패: %s", e)
         raise VisionAnalysisError("DeepFace 연령 추정에 실패했습니다.") from e
     finally:
         del image
@@ -185,4 +206,4 @@ def warm_up_deepface() -> None:
 
 async def analyze_age(image_bytes: bytes) -> dict:
     """DeepFace 추론은 무거워서 threadpool에서 실행한다."""
-    return await run_in_threadpool(_run_deepface_age, image_bytes)
+    return await run_model_task(_run_deepface_age, image_bytes)

@@ -62,6 +62,8 @@ class VisionServiceTest(unittest.TestCase):
         old_deepface = vision_service._deepface
         old_ready = vision_service._age_model_ready
         old_error = vision_service._age_model_error
+        old_retry_after = vision_service._age_model_retry_after
+        old_cooldown = vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS
 
         class DummyDeepFace:
             calls = 0
@@ -76,6 +78,8 @@ class VisionServiceTest(unittest.TestCase):
         vision_service._deepface = DummyDeepFace
         vision_service._age_model_ready = False
         vision_service._age_model_error = None
+        vision_service._age_model_retry_after = 0.0
+        vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS = 0
 
         try:
             with self.assertRaises(VisionConfigurationError):
@@ -90,6 +94,44 @@ class VisionServiceTest(unittest.TestCase):
             vision_service._deepface = old_deepface
             vision_service._age_model_ready = old_ready
             vision_service._age_model_error = old_error
+            vision_service._age_model_retry_after = old_retry_after
+            vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS = old_cooldown
+
+    def test_deepface_model_load_failure_waits_during_cooldown(self):
+        old_deepface = vision_service._deepface
+        old_ready = vision_service._age_model_ready
+        old_error = vision_service._age_model_error
+        old_retry_after = vision_service._age_model_retry_after
+        old_cooldown = vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS
+
+        class DummyDeepFace:
+            calls = 0
+
+            @classmethod
+            def build_model(cls, *args, **kwargs):
+                cls.calls += 1
+                raise RuntimeError("temporary download failure")
+
+        vision_service._deepface = DummyDeepFace
+        vision_service._age_model_ready = False
+        vision_service._age_model_error = None
+        vision_service._age_model_retry_after = 0.0
+        vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS = 10
+
+        try:
+            with self.assertRaises(VisionConfigurationError):
+                _get_deepface()
+
+            with self.assertRaises(VisionConfigurationError):
+                _get_deepface()
+
+            self.assertEqual(DummyDeepFace.calls, 1)
+        finally:
+            vision_service._deepface = old_deepface
+            vision_service._age_model_ready = old_ready
+            vision_service._age_model_error = old_error
+            vision_service._age_model_retry_after = old_retry_after
+            vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS = old_cooldown
 
 
 if __name__ == "__main__":

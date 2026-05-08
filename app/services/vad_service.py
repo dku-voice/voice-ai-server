@@ -8,9 +8,9 @@ import torch
 import logging
 import threading
 from silero_vad import get_speech_timestamps, load_silero_vad
-from starlette.concurrency import run_in_threadpool
 
 from app.config import VAD_THRESHOLD, VAD_SAMPLE_RATE
+from app.services.threadpool import run_model_task
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ def _load_vad_model():
         if _vad_model is not None:
             return _vad_model
 
-        print("[VAD] Silero VAD 모델 로딩 중...")
+        logger.info("[VAD] Silero VAD 모델 로딩 중...")
         _vad_model = load_silero_vad()
-        print("[VAD] 모델 로딩 완료!")
+        logger.info("[VAD] 모델 로딩 완료!")
     return _vad_model
 
 
@@ -115,8 +115,7 @@ def detect_speech(audio_bytes: bytes) -> dict:
 
     except Exception as e:
         # numpy 관련 에러가 대부분임 (dtype, shape 문제)
-        print(f"[VAD] 에러 발생: {e}")
-        logger.error(f"[VAD] 처리 실패: {e}")
+        logger.error("[VAD] 처리 실패: %s", e)
         # VAD가 실패해도 서버는 죽이지 않는다.
         # 일단 음성이 있다고 보고 STT로 넘겨서 다음 단계에서 처리하게 둔다.
         fallback_audio = None
@@ -139,4 +138,4 @@ async def detect_speech_async(audio_bytes: bytes) -> dict:
     WebSocket 핸들러에서 쓰는 비동기 wrapper.
     VAD도 모델 추론이라 threadpool에서 실행한다.
     """
-    return await run_in_threadpool(detect_speech, audio_bytes)
+    return await run_model_task(detect_speech, audio_bytes)

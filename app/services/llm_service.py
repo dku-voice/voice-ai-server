@@ -13,10 +13,10 @@ from typing import Any, List
 
 from openai import OpenAI
 from httpx import Timeout
-from starlette.concurrency import run_in_threadpool
 
 from app.config import LLM_MODEL, OPENAI_API_KEY
 from app.schemas import OrderItem
+from app.services.threadpool import run_llm_task
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +67,6 @@ SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보
 3. 텍스트에서 우리 매장 메뉴에 있는 항목을 전혀 식별할 수 없는 경우, 반드시 빈 배열 []을 반환하십시오. 메뉴에 없는 항목을 절대 지어내지 마십시오(환각/Hallucination 방지)."""
 
 
-# user prompt 뒤에 붙이는 JSON 형식 안내
-FORMAT_INSTRUCTION = """
-반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
-[{"menu_id": "burger_01", "quantity": 2, "options": ["소스 빼주세요"]}]
-
-사용 가능한 menu_id 목록:
-- burger_01: 햄버거
-- cola_01: 콜라
-- fries_01: 감자튀김
-- pizza_01: 피자
-- chicken_01: 치킨
-"""
-
-
 # LLM이 실패했을 때 쓰는 키워드 fallback.
 # v1.0에서 쓰던 단순 매칭을 정리해서 남겨뒀다.
 
@@ -92,6 +78,20 @@ MENU_CATALOG = {
     "pizza_01": "피자",
     "chicken_01": "치킨",
 }
+
+
+def _format_menu_catalog_instruction() -> str:
+    return "\n".join(f"- {menu_id}: {name}" for menu_id, name in MENU_CATALOG.items())
+
+
+# user prompt 뒤에 붙이는 JSON 형식 안내
+FORMAT_INSTRUCTION = f"""
+반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
+[{{"menu_id": "burger_01", "quantity": 2, "options": ["소스 빼주세요"]}}]
+
+사용 가능한 menu_id 목록:
+{_format_menu_catalog_instruction()}
+"""
 
 MENU_ALIASES = {
     "burger_01": ("햄버거", "버거"),
@@ -304,7 +304,7 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True) -> List[Order
 
     items = _merge_duplicate_items(items)
     if log_result:
-        print(f"[LLM-Fallback] 키워드 매칭 결과: {len(items)}건")
+        logger.info("[LLM-Fallback] 키워드 매칭 결과: %s건", len(items))
     return items
 
 
@@ -457,7 +457,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
     # ===== Phase 1: 첫 번째 LLM 호출 =====
     # 짧은 텍스트에는 로그에 굳이 ...를 붙이지 않는다.
     display = text[:50] + "..." if len(text) > 50 else text
-    print(f"[LLM] Phase 1: LLM 호출 시작 (text: '{display}')")
+    logger.info("[LLM] Phase 1: LLM 호출 시작 (text: '%s')", display)
     try:
         client = _get_client()
         response = client.chat.completions.create(
@@ -470,34 +470,32 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
             max_tokens=500,
         )
         raw = response.choices[0].message.content
-        print(f"[LLM] Phase 1 응답: {raw}")
+        logger.debug("[LLM] Phase 1 응답: %s", raw)
 
         if raw is None:
             raise LLMResponseValidationError("LLM 응답 content가 None입니다.")
 
         items = _parse_llm_response(raw, text)
-        print(f"[LLM] Phase 1 성공! {len(items)}건 파싱됨")
+        logger.info("[LLM] Phase 1 성공. %s건 파싱됨", len(items))
         return ("success", items)
 
     except LLMConfigurationError as e:
-        print(f"[LLM] 설정 오류: {e}")
         logger.warning(f"[LLM] 설정 오류, Phase 3 fallback 진입: {e}")
         return ("fallback", _fallback_keyword_parse(text))
 
     except (json.JSONDecodeError, LLMResponseValidationError) as e:
-        print(f"[LLM] Phase 1 응답 검증 실패: {e}")
         logger.warning(f"[LLM] Phase 1 응답 검증 실패, Phase 2로 진행: {e}")
 
     except Exception as e:
-        print(f"[LLM] Phase 1 에러 (API 장애?): {e}")
         logger.error(f"[LLM] Phase 1 실패: {e}")
         # API 자체가 터진 거면 Phase 2도 의미 없으니 바로 Phase 3
-        print("[LLM] API 에러 → Phase 3 fallback으로 직행")
+        logger.info("[LLM] API 에러, Phase 3 fallback으로 직행")
         return ("fallback", _fallback_keyword_parse(text))
 
     # ===== Phase 2: JSON 형식으로 다시 요청 =====
-    print("[LLM] Phase 2: JSON 강제 재시도")
+    logger.info("[LLM] Phase 2: JSON 강제 재시도")
     try:
+        client = _get_client()
         response = client.chat.completions.create(
             model=LLM_MODEL,
             messages=[
@@ -514,22 +512,21 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
             max_tokens=500,
         )
         raw = response.choices[0].message.content
-        print(f"[LLM] Phase 2 응답: {raw}")
+        logger.debug("[LLM] Phase 2 응답: %s", raw)
 
         if raw is None:
             raise LLMResponseValidationError("LLM 응답 content가 None입니다.")
 
         items = _parse_llm_response(raw, text)
-        print(f"[LLM] Phase 2 성공! {len(items)}건 파싱됨")
+        logger.info("[LLM] Phase 2 성공. %s건 파싱됨", len(items))
         return ("success", items)
 
     except Exception as e:
-        print(f"[LLM] Phase 2도 실패: {e}")
         logger.error(f"[LLM] Phase 2 실패, Phase 3 fallback 진입: {e}")
 
     # ===== Phase 3: 키워드 fallback =====
     # 여기까지 왔으면 LLM 결과를 믿기 어려우므로 단순 매칭으로 내려간다.
-    print("[LLM] Phase 3: v1.0 레거시 fallback 실행")
+    logger.info("[LLM] Phase 3: v1.0 레거시 fallback 실행")
     return ("fallback", _fallback_keyword_parse(text))
 
 
@@ -553,7 +550,7 @@ async def extract_order(text: str) -> dict:
 
     try:
         # LLM 호출도 블로킹이라 threadpool에서 실행한다.
-        phase, items = await run_in_threadpool(_call_llm_sync, text)
+        phase, items = await run_llm_task(_call_llm_sync, text)
 
         return {
             "status": phase,
@@ -563,7 +560,6 @@ async def extract_order(text: str) -> dict:
 
     except Exception as e:
         # 여기까지 오면 거의 예외 상황이지만 서버는 죽이지 않는다.
-        print(f"[LLM] 전체 파이프라인 에러: {e}")
         logger.error(f"[LLM] extract_order 최종 실패: {e}")
 
         # 그래도 키워드 fallback은 한 번 더 시도한다.
@@ -576,7 +572,7 @@ async def extract_order(text: str) -> dict:
             }
         except Exception as e2:
             # 진짜 아무것도 안 되는 상황 (이러면 그냥 에러)
-            print(f"[LLM] fallback마저 실패: {e2}")
+            logger.error("[LLM] fallback마저 실패: %s", e2)
             return {
                 "status": "error",
                 "items": [],

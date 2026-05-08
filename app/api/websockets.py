@@ -75,7 +75,7 @@ async def audio_websocket(ws: WebSocket):
     """
     await ws.accept()
     client_info = f"{ws.client.host}:{ws.client.port}" if ws.client else "unknown"
-    print(f"[WS] 클라이언트 연결됨: {client_info}")
+    logger.info("[WS] 클라이언트 연결됨: %s", client_info)
 
     try:
         while True:
@@ -90,7 +90,7 @@ async def audio_websocket(ws: WebSocket):
                         timeout=WS_RECEIVE_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
-                    print(f"[WS] 수신 timeout: {WS_RECEIVE_TIMEOUT_SECONDS}초 동안 메시지 없음")
+                    logger.warning("[WS] 수신 timeout: %s초 동안 메시지 없음", WS_RECEIVE_TIMEOUT_SECONDS)
                     await ws.send_json(
                         VoiceOrderResponse(
                             status="error",
@@ -105,14 +105,14 @@ async def audio_websocket(ws: WebSocket):
                 # ws.receive()가 disconnect 메시지를 dict로 줄 때가 있어서
                 # 여기서 직접 확인하지 않으면 루프가 계속 돌 수 있다.
                 if data.get("type") == "websocket.disconnect":
-                    print(f"[WS] 내부 루프에서 연결 종료 감지")
+                    logger.info("[WS] 내부 루프에서 연결 종료 감지")
                     raise WebSocketDisconnect(code=data.get("code", 1000))
 
                 # 텍스트 메시지는 지금 "END"만 의미 있게 쓴다.
                 if "text" in data:
                     msg = data["text"]
                     if msg.strip().upper() == "END":
-                        print(f"[WS] 녹음 종료 신호 수신 (수집된 bytes: {len(audio_buffer)})")
+                        logger.info("[WS] 녹음 종료 신호 수신 (수집된 bytes: %s)", len(audio_buffer))
                         break
                     # END가 아닌 텍스트는 일단 무시한다.
                     continue
@@ -124,7 +124,7 @@ async def audio_websocket(ws: WebSocket):
                     # 너무 긴 녹음은 여기서 끊는다.
                     next_size = len(audio_buffer) + len(chunk)
                     if next_size > MAX_AUDIO_BYTES:
-                        print(f"[WS] 오디오 버퍼 한도 초과: {next_size} bytes")
+                        logger.warning("[WS] 오디오 버퍼 한도 초과: %s bytes", next_size)
                         await ws.send_json(
                             VoiceOrderResponse(
                                 status="error",
@@ -141,7 +141,7 @@ async def audio_websocket(ws: WebSocket):
 
             # 빈 END만 와도 클라이언트가 계속 기다리지 않도록 바로 응답한다.
             if len(audio_buffer) == 0:
-                print("[WS] 빈 오디오 버퍼, 빈 주문 응답")
+                logger.info("[WS] 빈 오디오 버퍼, 빈 주문 응답")
                 await ws.send_json(
                     VoiceOrderResponse(
                         status="success",
@@ -155,7 +155,7 @@ async def audio_websocket(ws: WebSocket):
             audio_bytes = bytes(audio_buffer)
             audio_error = _validate_raw_pcm_audio(audio_bytes)
             if audio_error:
-                print(f"[WS] 지원하지 않는 오디오 입력: {audio_error}")
+                logger.warning("[WS] 지원하지 않는 오디오 입력: %s", audio_error)
                 await ws.send_json(
                     VoiceOrderResponse(
                         status="error",
@@ -167,11 +167,11 @@ async def audio_websocket(ws: WebSocket):
                 continue
 
             # ===== Stage 1: VAD (음성 감지) =====
-            print("[WS] Stage 1: VAD 처리 중...")
+            logger.info("[WS] Stage 1: VAD 처리 중...")
             vad_result = await detect_speech_async(audio_bytes)
 
             if not vad_result["has_speech"]:
-                print("[WS] VAD: 음성 없음 → 무시")
+                logger.info("[WS] VAD: 음성 없음, 무시")
                 await ws.send_json(
                     VoiceOrderResponse(
                         status="success",
@@ -186,7 +186,7 @@ async def audio_websocket(ws: WebSocket):
 
             # VAD fallback에서는 speech_audio가 None일 수 있어서 원본 bytes를 다시 변환한다.
             if speech_audio is None:
-                print("[WS] VAD fallback: speech_audio 없음 → 원본 bytes로 STT 시도")
+                logger.info("[WS] VAD fallback: speech_audio 없음, 원본 bytes로 STT 시도")
                 try:
                     speech_audio = bytes_to_float32(audio_bytes)
                 except Exception:
@@ -201,12 +201,12 @@ async def audio_websocket(ws: WebSocket):
                     continue
 
             # ===== Stage 2: STT (음성 → 텍스트) =====
-            print("[WS] Stage 2: STT 처리 중...")
+            logger.info("[WS] Stage 2: STT 처리 중...")
             try:
                 recognized_text = await transcribe(speech_audio)
-                print(f"[WS] STT 결과: '{recognized_text}'")
+                logger.info("[WS] STT 결과: '%s'", recognized_text)
             except Exception as e:
-                print(f"[WS] STT 에러: {e}")
+                logger.error("[WS] STT 에러: %s", e)
                 await ws.send_json(
                     VoiceOrderResponse(
                         status="error",
@@ -230,7 +230,7 @@ async def audio_websocket(ws: WebSocket):
                 continue
 
             # ===== Stage 3: LLM (텍스트 → 주문 파싱) =====
-            print("[WS] Stage 3: LLM 주문 파싱 중...")
+            logger.info("[WS] Stage 3: LLM 주문 파싱 중...")
             llm_result = await extract_order(recognized_text)
 
             # 프론트로 보낼 최종 응답
@@ -242,16 +242,14 @@ async def audio_websocket(ws: WebSocket):
             )
 
             await ws.send_json(response.model_dump())
-            print(f"[WS] 응답 전송 완료: status={response.status}, items={len(response.items)}건")
+            logger.info("[WS] 응답 전송 완료: status=%s, items=%s건", response.status, len(response.items))
 
     except WebSocketDisconnect:
         # 브라우저 탭을 닫거나 네트워크가 끊기면 여기로 온다.
-        print(f"[WS] 클라이언트 연결 해제: {client_info}")
-        logger.info(f"[WS] WebSocket 연결 종료: {client_info}")
+        logger.info("[WS] WebSocket 연결 종료: %s", client_info)
 
     except Exception as e:
         # 예상 못한 에러가 나도 가능하면 JSON으로 알려준다.
-        print(f"[WS] 예상치 못한 에러: {e}")
         logger.error(f"[WS] 핸들러 에러: {e}", exc_info=True)
         try:
             await ws.send_json(

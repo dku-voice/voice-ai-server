@@ -23,6 +23,17 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertIn("fries_01", menu_ids)
         self.assertIn("cola_01", menu_ids)
 
+    def test_retrieve_broad_recommendation_returns_default_candidates(self):
+        docs = retrieve_menu_documents("메뉴 추천해줘", top_k=2)
+
+        self.assertEqual(len(docs), 2)
+        self.assertEqual(docs[0].metadata["menu_id"], "burger_01")
+
+    def test_retrieve_unrelated_query_returns_no_documents(self):
+        docs = retrieve_menu_documents("오늘 날씨 어때", top_k=3)
+
+        self.assertEqual(docs, [])
+
     def test_parse_recommendation_response_fills_name_and_deduplicates(self):
         docs = retrieve_menu_documents("사이드랑 음료 추천해줘", top_k=2)
         raw = """
@@ -85,6 +96,13 @@ class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["recommendations"], [])
+
+    async def test_recommend_menus_returns_error_for_unrelated_query(self):
+        result = await recommend_menus("오늘 날씨 어때", top_k=3)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["recommendations"], [])
+        self.assertEqual(result["retrieved_menu_ids"], [])
 
 
 class RecommendationApiTest(unittest.TestCase):

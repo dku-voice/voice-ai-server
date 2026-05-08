@@ -12,7 +12,6 @@ import io
 import threading
 import soundfile as sf
 from faster_whisper import WhisperModel
-from starlette.concurrency import run_in_threadpool
 
 from app.config import (
     WHISPER_MODEL_SIZE,
@@ -20,6 +19,7 @@ from app.config import (
     WHISPER_COMPUTE_TYPE,
     STT_LANGUAGE,
 )
+from app.services.threadpool import run_model_task
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +38,20 @@ def load_model():
     """
     global _whisper_model, _whisper_model_error
     if _whisper_model is not None:
-        print("[STT] 모델 이미 로딩되어 있음, skip")
+        logger.info("[STT] 모델 이미 로딩되어 있음, skip")
         return
 
     with _whisper_model_lock:
         if _whisper_model is not None:
-            print("[STT] 모델 이미 로딩되어 있음, skip")
+            logger.info("[STT] 모델 이미 로딩되어 있음, skip")
             return
 
-        print(f"[STT] faster-whisper 모델 로딩: size={WHISPER_MODEL_SIZE}, "
-              f"device={WHISPER_DEVICE}, compute={WHISPER_COMPUTE_TYPE}")
+        logger.info(
+            "[STT] faster-whisper 모델 로딩: size=%s, device=%s, compute=%s",
+            WHISPER_MODEL_SIZE,
+            WHISPER_DEVICE,
+            WHISPER_COMPUTE_TYPE,
+        )
 
         try:
             _whisper_model = WhisperModel(
@@ -61,7 +65,7 @@ def load_model():
             raise
 
         _whisper_model_error = None
-        print("[STT] 모델 로딩 완료!")
+        logger.info("[STT] 모델 로딩 완료!")
 
 
 def _get_model() -> WhisperModel:
@@ -116,13 +120,13 @@ def _transcribe_sync(audio_data: np.ndarray) -> str:
 async def transcribe(audio_data: np.ndarray) -> str:
     """
     FastAPI 쪽에서 쓰는 비동기 wrapper.
-    내부 STT는 동기 함수라 run_in_threadpool로 감싼다.
+    내부 STT는 동기 함수라 제한된 threadpool로 감싼다.
     """
-    print(f"[STT] 비동기 transcribe 시작 (audio shape: {audio_data.shape})")
+    logger.debug("[STT] 비동기 transcribe 시작 (audio shape: %s)", audio_data.shape)
 
-    result = await run_in_threadpool(_transcribe_sync, audio_data)
+    result = await run_model_task(_transcribe_sync, audio_data)
 
-    print(f"[STT] 결과: {result}")
+    logger.info("[STT] 결과: %s", result)
     return result
 
 
@@ -142,6 +146,6 @@ async def transcribe_bytes(audio_bytes: bytes) -> str:
         return await transcribe(audio_np)
 
     except Exception as e:
-        print(f"[STT] bytes 변환 에러: {e}")
+        logger.warning("[STT] bytes 변환 에러: %s", e)
         logger.error(f"[STT] transcribe_bytes 실패: {e}")
         raise

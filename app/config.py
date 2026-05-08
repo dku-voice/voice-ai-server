@@ -34,6 +34,14 @@ def _get_bool_env(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_int_env(name: str, default: int, min_value: int = 1) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(min_value, value)
+
+
 # --- GPU 사용 설정 ---
 # true이면 STT/DeepFace가 GPU를 잡지 않게 CPU 쪽으로 고정한다.
 DISABLE_GPU = _get_bool_env("DISABLE_GPU", "false")
@@ -75,6 +83,10 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 # WebSocket에서 다음 메시지를 기다리는 최대 시간
 WS_RECEIVE_TIMEOUT_SECONDS = float(os.getenv("WS_RECEIVE_TIMEOUT_SECONDS", "30"))
 
+# 무거운 작업이 동시에 너무 많이 돌면 CPU/RAM을 금방 잡아먹어서 제한을 둔다.
+MODEL_THREAD_LIMIT = _get_int_env("MODEL_THREAD_LIMIT", 2)
+LLM_THREAD_LIMIT = _get_int_env("LLM_THREAD_LIMIT", 8)
+
 
 # --- LLM 환경 설정 ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -86,3 +98,4 @@ VISION_MAX_IMAGE_BYTES = int(os.getenv("VISION_MAX_IMAGE_BYTES", str(5 * 1024 * 
 VISION_MAX_IMAGE_PIXELS = int(os.getenv("VISION_MAX_IMAGE_PIXELS", str(6_000_000)))
 SENIOR_AGE_THRESHOLD = int(os.getenv("SENIOR_AGE_THRESHOLD", "60"))
 VISION_WARMUP_ON_STARTUP = _get_bool_env("VISION_WARMUP_ON_STARTUP", "false")
+VISION_MODEL_RETRY_COOLDOWN_SECONDS = float(os.getenv("VISION_MODEL_RETRY_COOLDOWN_SECONDS", "10"))

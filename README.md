@@ -41,6 +41,7 @@ voice-ai-server/
 │   │   ├── llm_service.py
 │   │   ├── recommendation_service.py
 │   │   ├── stt_service.py
+│   │   ├── threadpool.py
 │   │   ├── vad_service.py
 │   │   └── vision_service.py
 │   ├── config.py
@@ -98,15 +99,21 @@ WHISPER_COMPUTE_TYPE=int8
 
 VAD_THRESHOLD=0.6
 WS_RECEIVE_TIMEOUT_SECONDS=30
+MODEL_THREAD_LIMIT=2
+LLM_THREAD_LIMIT=8
 
 VISION_MAX_IMAGE_BYTES=5242880
 VISION_MAX_IMAGE_PIXELS=6000000
 VISION_WARMUP_ON_STARTUP=false
+VISION_MODEL_RETRY_COOLDOWN_SECONDS=10
 SENIOR_AGE_THRESHOLD=60
 ```
 
 `DISABLE_GPU=true`이면 GPU를 막고 STT를 `cpu/int8`로 고정합니다.
 `DISABLE_GPU=false`이면 GPU를 막지 않습니다. GPU 서버에서 STT도 GPU로 돌릴 때는 `WHISPER_DEVICE=cuda`, `WHISPER_COMPUTE_TYPE=float16`처럼 지정합니다.
+`MODEL_THREAD_LIMIT`는 STT/VAD/DeepFace 같은 로컬 모델 작업 수를 제한합니다.
+`LLM_THREAD_LIMIT`는 OpenAI 호출 작업 수를 제한합니다.
+`VISION_MODEL_RETRY_COOLDOWN_SECONDS`는 DeepFace age 모델 로딩 실패 뒤 바로 재시도하지 않고 기다리는 시간입니다.
 
 ## 실행
 

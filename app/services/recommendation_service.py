@@ -11,8 +11,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from starlette.concurrency import run_in_threadpool
-
 from app.config import LLM_MODEL
 from app.schemas import MenuRecommendationItem
 from app.services.llm_service import (
@@ -22,6 +20,7 @@ from app.services.llm_service import (
     MENU_CATALOG,
     get_llm_client,
 )
+from app.services.threadpool import run_llm_task
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +72,20 @@ MENU_RECOMMENDATION_PROFILES = [
         "description": "치킨 메뉴. 메인 메뉴나 함께 먹는 메뉴로 고르기 좋습니다.",
     },
 ]
+
+RECOMMENDATION_INTENT_TERMS = (
+    "추천",
+    "메뉴",
+    "먹",
+    "마시",
+    "음식",
+    "식사",
+    "간식",
+    "고르",
+    "주문",
+    "배고",
+    "출출",
+)
 
 RECOMMENDATION_SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk의 메뉴 추천 마이크로서비스입니다.
 반드시 제공된 메뉴 문서에 있는 menu_id만 추천하세요.
@@ -150,6 +163,11 @@ def _score_document(query: str, document: MenuDocument) -> int:
     return score
 
 
+def _looks_like_recommendation_query(query: str) -> bool:
+    normalized_query = _normalize_text(query)
+    return any(term in normalized_query for term in RECOMMENDATION_INTENT_TERMS)
+
+
 def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
     """
     메뉴 문서 검색.
@@ -167,7 +185,13 @@ def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
     matched = [item for item in scored if item[0] > 0]
 
     # "추천해줘"처럼 조건이 아직 넓은 문장은 기본 메뉴 문서를 안정적인 순서로 넘긴다.
-    candidates = matched if matched else scored
+    if matched:
+        candidates = matched
+    elif _looks_like_recommendation_query(query):
+        candidates = scored
+    else:
+        return []
+
     candidates.sort(key=lambda item: (-item[0], item[1]))
     return [document for _, _, document in candidates[:top_k]]
 
@@ -339,7 +363,7 @@ async def recommend_menus(query: str, top_k: int = 3) -> dict:
         }
 
     try:
-        phase, recommendations = await run_in_threadpool(
+        phase, recommendations = await run_llm_task(
             _call_recommendation_llm_sync,
             query,
             documents,

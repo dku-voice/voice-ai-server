@@ -16,6 +16,7 @@ from app.api.websockets import router as ws_router
 from app.config import VISION_WARMUP_ON_STARTUP
 from app.services.stt_service import get_model_status as get_stt_model_status
 from app.services.stt_service import load_model as load_stt_model
+from app.services.threadpool import run_model_task
 from app.services.vision_service import warm_up_deepface
 
 
@@ -34,48 +35,43 @@ async def lifespan(app: FastAPI):
     STT는 첫 요청에서 로딩하면 너무 느려서 시작할 때 먼저 올려본다.
     """
     # === Startup ===
-    print("=" * 50)
-    print("🚀 Voice AI Server v2.0 시작!")
-    print("=" * 50)
+    logger.info("Voice AI Server v2.0 시작")
 
     # STT 모델은 서버 시작 시 한 번만 로딩한다.
-    print("[Startup] STT 모델 로딩 중...")
+    logger.info("[Startup] STT 모델 로딩 중...")
     try:
-        load_stt_model()
+        await run_model_task(load_stt_model)
         app.state.stt_ready = True
         app.state.stt_error = None
     except Exception as e:
         app.state.stt_ready = False
         app.state.stt_error = str(e)
         logger.error("[Startup] STT 모델 로딩 실패. 서버는 degraded 상태로 계속 실행됩니다: %s", e, exc_info=True)
-        print("[Startup] STT 모델 로딩 실패. /ws/audio 요청이 오면 STT 단계에서 에러를 돌려줍니다.")
 
     # VAD 모델은 첫 호출 때 로딩한다.
-    print("[Startup] VAD 모델은 첫 요청 시 로딩됨 (lazy)")
+    logger.info("[Startup] VAD 모델은 첫 요청 시 로딩됨 (lazy)")
 
     if VISION_WARMUP_ON_STARTUP:
-        print("[Startup] DeepFace 연령 추정 모델 워밍업 중...")
+        logger.info("[Startup] DeepFace 연령 추정 모델 워밍업 중...")
         try:
-            warm_up_deepface()
+            await run_model_task(warm_up_deepface)
             app.state.vision_ready = True
             app.state.vision_error = None
         except Exception as e:
             app.state.vision_ready = False
             app.state.vision_error = str(e)
             logger.warning("[Startup] DeepFace 모델 워밍업 실패. 연령 추정 요청이 오면 에러를 돌려줍니다: %s", e)
-            print("[Startup] DeepFace 워밍업 실패. /api/vision 요청이 오면 에러를 돌려줍니다.")
     else:
         app.state.vision_ready = False
         app.state.vision_error = None
-        print("[Startup] DeepFace 모델은 첫 vision 요청 시 로딩됨 (lazy)")
+        logger.info("[Startup] DeepFace 모델은 첫 vision 요청 시 로딩됨 (lazy)")
 
-    print("[Startup] 서버 준비 완료")
-    print("=" * 50)
+    logger.info("[Startup] 서버 준비 완료")
 
     yield
 
     # === Shutdown ===
-    print("[Shutdown] 서버 종료 중...")
+    logger.info("[Shutdown] 서버 종료 중...")
     logger.info("서버 정상 종료")
 
 
