@@ -75,7 +75,7 @@ VAD_SAMPLE_RATE = 16000
 
 # --- Server 설정 ---
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
-SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+SERVER_PORT = _get_int_env("SERVER_PORT", 8000)
 
 # 로그 레벨
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

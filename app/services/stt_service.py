@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 _whisper_model: WhisperModel | None = None
 _whisper_model_error: str | None = None
 _whisper_model_lock = threading.Lock()
+_whisper_transcribe_lock = threading.Lock()
 
 
 def load_model():
@@ -99,17 +100,18 @@ def _transcribe_sync(audio_data: np.ndarray) -> str:
     """
     model = _get_model()
 
-    # v1.0처럼 임시 파일을 만들지 않고 ndarray를 바로 넘긴다.
-    segments, info = model.transcribe(
-        audio_data,
-        language=STT_LANGUAGE,
-        beam_size=5,  # 올리면 조금 더 정확할 수 있지만 느려진다.
-    )
+    with _whisper_transcribe_lock:
+        # v1.0처럼 임시 파일을 만들지 않고 ndarray를 바로 넘긴다.
+        segments, info = model.transcribe(
+            audio_data,
+            language=STT_LANGUAGE,
+            beam_size=5,  # 올리면 조금 더 정확할 수 있지만 느려진다.
+        )
 
-    # segments는 generator라 직접 돌면서 텍스트를 모은다.
-    text_parts = []
-    for seg in segments:
-        text_parts.append(seg.text.strip())
+        # segments는 generator라 실제 추론이 순회 시점에 일어날 수 있다.
+        text_parts = []
+        for seg in segments:
+            text_parts.append(seg.text.strip())
 
     result_text = " ".join(text_parts).strip()
 

@@ -29,6 +29,33 @@ class VADServiceTest(unittest.TestCase):
         self.assertIsNotNone(result["speech_audio"])
         self.assertEqual(result["speech_audio"].dtype, np.float32)
 
+    def test_detect_speech_runs_timestamp_api_under_inference_lock(self):
+        audio_bytes = np.zeros(1600, dtype=np.int16).tobytes()
+
+        class RecordingLock:
+            locked = False
+
+            def __enter__(self):
+                self.locked = True
+
+            def __exit__(self, exc_type, exc, tb):
+                self.locked = False
+
+        lock = RecordingLock()
+
+        def fake_get_speech_timestamps(*args, **kwargs):
+            if not lock.locked:
+                raise AssertionError("VAD inference lock was not held")
+            return [{"start": 0, "end": 800}]
+
+        with patch.object(vad_service, "_load_vad_model", return_value=object()), \
+            patch.object(vad_service, "_vad_inference_lock", lock), \
+            patch.object(vad_service, "get_speech_timestamps", side_effect=fake_get_speech_timestamps):
+            result = vad_service.detect_speech(audio_bytes)
+
+        self.assertTrue(result["has_speech"])
+        self.assertIsNotNone(result["speech_audio"])
+
 
 if __name__ == "__main__":
     unittest.main()

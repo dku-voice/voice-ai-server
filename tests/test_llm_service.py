@@ -1,7 +1,10 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.services.llm_service import (
     LLMResponseValidationError,
+    _call_llm_sync,
     _fallback_keyword_parse,
     _parse_llm_response,
 )
@@ -156,6 +159,57 @@ class LLMServiceValidationTest(unittest.TestCase):
 
     def test_empty_json_is_valid_when_text_has_no_menu(self):
         self.assertEqual(_parse_llm_response("[]", "안녕하세요"), [])
+
+    def test_phase2_runs_for_json_parse_error(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                content = "주문은 콜라입니다."
+                if self.calls == 2:
+                    content = '[{"menu_id": "cola_01", "quantity": 1, "options": []}]'
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+                )
+
+        completions = FakeCompletions()
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch("app.services.llm_service._get_client", return_value=fake_client):
+            phase, items = _call_llm_sync("콜라 하나 주세요")
+
+        self.assertEqual(phase, "success")
+        self.assertEqual(completions.calls, 2)
+        self.assertEqual(items[0].menu_id, "cola_01")
+
+    def test_phase2_is_skipped_for_semantic_validation_error(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content='[{"menu_id": "burger_01", "quantity": 1, "options": []}]'
+                            )
+                        )
+                    ]
+                )
+
+        completions = FakeCompletions()
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch("app.services.llm_service._get_client", return_value=fake_client):
+            phase, items = _call_llm_sync("콜라 하나 주세요")
+
+        self.assertEqual(phase, "fallback")
+        self.assertEqual(completions.calls, 1)
+        self.assertEqual(items[0].menu_id, "cola_01")
 
 
 if __name__ == "__main__":

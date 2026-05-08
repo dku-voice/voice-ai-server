@@ -34,6 +34,10 @@ class LLMResponseValidationError(ValueError):
     """LLM 응답이 주문 스키마 또는 메뉴 정책을 통과하지 못한 경우"""
 
 
+class LLMResponseFormatError(LLMResponseValidationError):
+    """LLM 응답에서 JSON 배열 형식을 찾지 못한 경우"""
+
+
 def _get_client() -> OpenAI:
     """OpenAI 클라이언트 싱글톤"""
     global _client
@@ -320,7 +324,7 @@ def _extract_json_array(raw_text: str) -> str:
     start_idx = cleaned.find("[")
     end_idx = cleaned.rfind("]")
     if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-        raise LLMResponseValidationError("LLM 응답에서 JSON 배열을 찾지 못했습니다.")
+        raise LLMResponseFormatError("LLM 응답에서 JSON 배열을 찾지 못했습니다.")
 
     return cleaned[start_idx:end_idx + 1]
 
@@ -451,7 +455,7 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
     동기 LLM 호출. FastAPI 쪽에서는 threadpool로 감싸서 부른다.
 
     1차: LLM 호출 후 JSON 파싱
-    2차: JSON 파싱 실패 시 한 번 더 요청
+    2차: JSON 형식이 깨졌을 때만 한 번 더 요청
     마지막: 그래도 실패하면 키워드 fallback
     """
     # ===== Phase 1: 첫 번째 LLM 호출 =====
@@ -483,8 +487,12 @@ def _call_llm_sync(text: str) -> tuple[str, List[OrderItem]]:
         logger.warning(f"[LLM] 설정 오류, Phase 3 fallback 진입: {e}")
         return ("fallback", _fallback_keyword_parse(text))
 
-    except (json.JSONDecodeError, LLMResponseValidationError) as e:
-        logger.warning(f"[LLM] Phase 1 응답 검증 실패, Phase 2로 진행: {e}")
+    except (json.JSONDecodeError, LLMResponseFormatError) as e:
+        logger.warning("[LLM] Phase 1 JSON 형식 오류, Phase 2로 진행: %s", e)
+
+    except LLMResponseValidationError as e:
+        logger.warning("[LLM] Phase 1 검증 실패, Phase 3 fallback 진입: %s", e)
+        return ("fallback", _fallback_keyword_parse(text))
 
     except Exception as e:
         logger.error(f"[LLM] Phase 1 실패: {e}")

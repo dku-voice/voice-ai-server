@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Silero VAD 모델도 한 번만 로드해서 재사용한다.
 _vad_model = None
 _vad_model_lock = threading.Lock()
+_vad_inference_lock = threading.Lock()
 SPEECH_PADDING_MS = 120
 
 
@@ -89,11 +90,12 @@ def detect_speech(audio_bytes: bytes) -> dict:
         # 처음에는 모델에 전체 tensor를 바로 넣었다가 512 samples 에러가 났다.
         # confidence = model(audio_tensor, VAD_SAMPLE_RATE).item()
         # 지금은 공식 API인 get_speech_timestamps를 사용한다.
-        timestamps = get_speech_timestamps(
-            audio_tensor, model,
-            sampling_rate=VAD_SAMPLE_RATE,
-            threshold=VAD_THRESHOLD,
-        )
+        with _vad_inference_lock:
+            timestamps = get_speech_timestamps(
+                audio_tensor, model,
+                sampling_rate=VAD_SAMPLE_RATE,
+                threshold=VAD_THRESHOLD,
+            )
 
         has_speech = len(timestamps) > 0
 
