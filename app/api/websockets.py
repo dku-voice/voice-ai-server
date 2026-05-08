@@ -82,7 +82,6 @@ async def audio_websocket(ws: WebSocket):
             # 프론트가 녹음 중에는 bytes chunk를 계속 보내고,
             # "END"가 오면 한 주문이 끝난 것으로 본다.
             audio_buffer = bytearray()
-            buffer_overflowed = False
 
             while True:
                 try:
@@ -121,11 +120,11 @@ async def audio_websocket(ws: WebSocket):
                 # 바이너리 데이터는 오디오 chunk로 본다.
                 if "bytes" in data:
                     chunk = data["bytes"]
-                    audio_buffer.extend(chunk)
 
                     # 너무 긴 녹음은 여기서 끊는다.
-                    if len(audio_buffer) > MAX_AUDIO_BYTES:
-                        print(f"[WS] 오디오 버퍼 한도 초과: {len(audio_buffer)} bytes")
+                    next_size = len(audio_buffer) + len(chunk)
+                    if next_size > MAX_AUDIO_BYTES:
+                        print(f"[WS] 오디오 버퍼 한도 초과: {next_size} bytes")
                         await ws.send_json(
                             VoiceOrderResponse(
                                 status="error",
@@ -134,16 +133,14 @@ async def audio_websocket(ws: WebSocket):
                                 error_msg="오디오 데이터가 너무 큽니다 (최대 10MB)",
                             ).model_dump()
                         )
-                        audio_buffer.clear()
-                        buffer_overflowed = True
-                        break
+                        await ws.close(code=1009)
+                        return
 
+                    audio_buffer.extend(chunk)
                     continue
 
             # 빈 END만 와도 클라이언트가 계속 기다리지 않도록 바로 응답한다.
             if len(audio_buffer) == 0:
-                if buffer_overflowed:
-                    continue
                 print("[WS] 빈 오디오 버퍼, 빈 주문 응답")
                 await ws.send_json(
                     VoiceOrderResponse(

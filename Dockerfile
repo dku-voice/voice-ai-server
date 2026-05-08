@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt requirements-linux-cpu.txt ./
 RUN python -m pip install --upgrade pip \
-    && if [ "$DISABLE_GPU" = "false" ]; then \
+    && if [ "$DISABLE_GPU" = "true" ]; then \
         python -m pip install --no-cache-dir -r requirements-linux-cpu.txt; \
     else \
         python -m pip install --no-cache-dir -r requirements.txt; \

@@ -32,6 +32,10 @@ class VisionServiceTest(unittest.TestCase):
     def test_extract_age_from_list_result(self):
         self.assertEqual(_extract_age([{"age": "21"}]), 21)
 
+    def test_reject_empty_deepface_list_result(self):
+        with self.assertRaises(VisionAnalysisError):
+            _extract_age([])
+
     def test_reject_invalid_age_result(self):
         with self.assertRaises(VisionAnalysisError):
             _extract_age({"age": 150})

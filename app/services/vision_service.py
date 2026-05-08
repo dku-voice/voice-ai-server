@@ -113,7 +113,13 @@ def _get_deepface():
 
 def _extract_age(deepface_result: Any) -> int:
     """DeepFace 결과가 dict/list 어느 쪽으로 오든 age 값만 꺼낸다."""
-    result = deepface_result[0] if isinstance(deepface_result, list) else deepface_result
+    if isinstance(deepface_result, list):
+        if not deepface_result:
+            raise VisionAnalysisError("DeepFace 응답이 비어 있습니다.")
+        result = deepface_result[0]
+    else:
+        result = deepface_result
+
     if not isinstance(result, dict) or "age" not in result:
         raise VisionAnalysisError("DeepFace 응답에서 age 값을 찾지 못했습니다.")
 

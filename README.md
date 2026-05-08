@@ -7,10 +7,11 @@ DKU Capstone 음성 주문 Kiosk 프로젝트에서 사용하는 Python/FastAPI 
 
 - `WebSocket /ws/audio`: raw PCM 음성 chunk를 받아 VAD, STT, LLM 주문 파싱을 돌립니다.
 - `POST /api/vision/analyze_age`: 키오스크 시작 스냅샷으로 DeepFace age 분석을 돌립니다.
+- `POST /api/recommendations/menu`: 메뉴 문서를 검색한 뒤 LLM으로 추천 결과를 만듭니다.
 - `POST /api/voice`: 예전 HTTP 방식입니다. 새 연동은 `/ws/audio`를 씁니다.
 
-현재 브랜치는 팀 계획 3, 4주차 범위인 LLM 3단계 검증과 DeepFace 스냅샷 연령 추정을 정리한 상태입니다.
-RAG, YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 넣지 않았습니다.
+현재 브랜치는 팀 계획 3, 4주차 범위인 LLM 3단계 검증, DeepFace 스냅샷 연령 추정, RAG 메뉴 추천 기초 파이프라인을 정리한 상태입니다.
+RAG는 아직 메뉴 DB/벡터 DB 최적화 전 단계입니다. YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 넣지 않았습니다.
 
 ## 기술 스택
 
@@ -18,7 +19,7 @@ RAG, YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 
 Python: 3.11.x
 API: FastAPI / Uvicorn
 Audio: Silero VAD, faster-whisper
-LLM: OpenAI API
+LLM/RAG: OpenAI API, LangChain Core
 Vision: DeepFace, TensorFlow, tf-keras, Pillow
 Schema: Pydantic
 Container: Docker
@@ -33,10 +34,12 @@ CPU-only로 설치해야 할 때만 `requirements-linux-cpu.txt`를 씁니다.
 voice-ai-server/
 ├── app/
 │   ├── api/
+│   │   ├── recommendations.py
 │   │   ├── vision.py
 │   │   └── websockets.py
 │   ├── services/
 │   │   ├── llm_service.py
+│   │   ├── recommendation_service.py
 │   │   ├── stt_service.py
 │   │   ├── vad_service.py
 │   │   └── vision_service.py
@@ -117,6 +120,7 @@ python -m uvicorn main:app --reload
 - `GET /`: 서버 상태와 모델 설정 확인
 - `WebSocket /ws/audio`: 음성 주문 처리
 - `POST /api/vision/analyze_age`: 스냅샷 연령 추정
+- `POST /api/recommendations/menu`: RAG 메뉴 추천
 - `POST /api/voice`: 예전 HTTP 방식
 
 ## WebSocket 음성 입력 형식
@@ -164,6 +168,45 @@ chicken_01: 치킨
 ```
 
 menu_id는 프론트엔드 UI, Spring Boot 백엔드 DB/주문 API와 같이 맞춰야 합니다.
+
+## RAG 메뉴 추천 API
+
+```text
+POST /api/recommendations/menu
+Content-Type: application/json
+```
+
+요청 예시:
+
+```json
+{
+  "query": "사이드랑 음료 추천해줘",
+  "top_k": 3
+}
+```
+
+응답 예시:
+
+```json
+{
+  "status": "success",
+  "query": "사이드랑 음료 추천해줘",
+  "recommendations": [
+    {
+      "menu_id": "fries_01",
+      "name": "감자튀김",
+      "reason": "사이드 메뉴 요청과 잘 맞습니다."
+    }
+  ],
+  "retrieved_menu_ids": ["fries_01", "cola_01"],
+  "error_msg": null
+}
+```
+
+현재 RAG는 4주차 기초 파이프라인입니다.
+서버 안의 간단한 메뉴 문서를 LangChain Document 형태로 만들고, 키워드 검색으로 후보를 고른 뒤 LLM에 넘깁니다.
+OpenAI API 설정이 없거나 LLM 응답이 깨지면 검색된 메뉴 문서 기준 fallback 추천을 돌려줍니다.
+메뉴 DB 연동, embedding 생성, 벡터 DB 검색 최적화는 5주차 작업으로 남겨둡니다.
 
 ## Vision API
 

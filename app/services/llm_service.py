@@ -53,6 +53,11 @@ def _get_client() -> OpenAI:
     return _client
 
 
+def get_llm_client() -> OpenAI:
+    """다른 LLM 기반 서비스에서도 같은 timeout 설정을 재사용한다."""
+    return _get_client()
+
+
 # 팀에서 맞춰둔 주문 추출 prompt
 SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보 추출 마이크로서비스입니다. 당신의 유일한 임무는 고객의 음성 인식 텍스트에서 메뉴 항목, 수량 및 옵션을 추출하여 제공된 JSON 형식으로 엄격하게 출력하는 것입니다.
 
@@ -99,6 +104,26 @@ MENU_ALIASES = {
 ALIAS_BLOCKED_SUFFIXES = {
     ("fries_01", "프라이"): ("드",),
 }
+
+MENU_EXCLUDE_PARTICLES = ("", "은", "는", "을", "를", "도", "만")
+MENU_EXCLUDE_AFTER_WORDS = (
+    "빼고",
+    "빼주세요",
+    "빼줘",
+    "말고",
+    "제외하고",
+    "제외한",
+    "제외",
+    "없이",
+    "없는",
+    "안줘",
+    "안주세요",
+    "필요없어",
+    "필요없어요",
+    "필요없습니다",
+    "괜찮아요",
+)
+MENU_EXCLUDE_BEFORE_WORDS = ("노", "no")
 
 MAX_ORDER_QUANTITY = 20
 
@@ -191,6 +216,20 @@ def _is_alias_match_allowed(normalized_text: str, end_idx: int, menu_id: str, al
     return True
 
 
+def _is_menu_excluded_by_context(normalized_text: str, start_idx: int, end_idx: int) -> bool:
+    """메뉴명 바로 주변에 빼달라는 표현이 있으면 주문 항목에서 제외한다."""
+    before_window = normalized_text[max(0, start_idx - 4):start_idx]
+    if any(before_window.endswith(word) for word in MENU_EXCLUDE_BEFORE_WORDS):
+        return True
+
+    after_window = normalized_text[end_idx:end_idx + 12]
+    for particle in MENU_EXCLUDE_PARTICLES:
+        for word in MENU_EXCLUDE_AFTER_WORDS:
+            if after_window.startswith(particle + word):
+                return True
+    return False
+
+
 def _find_menu_matches(normalized_text: str) -> list[tuple[int, int, str]]:
     """텍스트 안의 메뉴 키워드 위치를 겹치지 않게 찾는다."""
     candidates: list[tuple[int, int, str]] = []
@@ -201,7 +240,10 @@ def _find_menu_matches(normalized_text: str) -> list[tuple[int, int, str]]:
             start_idx = normalized_text.find(normalized_alias)
             while start_idx != -1:
                 end_idx = start_idx + len(normalized_alias)
-                if _is_alias_match_allowed(normalized_text, end_idx, menu_id, normalized_alias):
+                if (
+                    _is_alias_match_allowed(normalized_text, end_idx, menu_id, normalized_alias)
+                    and not _is_menu_excluded_by_context(normalized_text, start_idx, end_idx)
+                ):
                     candidates.append((start_idx, end_idx, menu_id))
                 start_idx = normalized_text.find(normalized_alias, start_idx + 1)
 

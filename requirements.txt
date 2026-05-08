@@ -17,6 +17,7 @@ silero-vad==6.2.1
 
 # LLM
 openai==2.34.0
+langchain-core==1.3.3
 
 # Vision
 deepface==0.0.99

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.recommendations import router as recommendations_router
 from app.api.vision import router as vision_router
 from app.api.websockets import router as ws_router
 from app.config import VISION_WARMUP_ON_STARTUP
@@ -89,6 +90,7 @@ app = FastAPI(
 # 라우터 등록
 app.include_router(ws_router)
 app.include_router(vision_router)
+app.include_router(recommendations_router)
 
 
 # 예전 HTTP API.
@@ -121,6 +123,7 @@ def health_check():
         "endpoints": {
             "websocket": "/ws/audio",
             "vision_age": "/api/vision/analyze_age",
+            "menu_recommendation": "/api/recommendations/menu",
             "legacy_http": "/api/voice (deprecated)",
         },
         "models": {

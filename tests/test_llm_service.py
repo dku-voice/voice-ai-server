@@ -107,6 +107,30 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(items[0].menu_id, "cola_01")
         self.assertEqual(items[0].quantity, 3)
 
+    def test_keyword_fallback_skips_excluded_menu_mentions(self):
+        cases = [
+            "햄버거 하나 콜라 빼고 주세요",
+            "콜라 말고 햄버거 하나 주세요",
+            "콜라는 빼고 감자튀김 주세요",
+            "콜라 제외하고 햄버거 하나 주세요",
+            "노콜라 버거 하나 주세요",
+        ]
+
+        for text in cases:
+            with self.subTest(text=text):
+                items = _fallback_keyword_parse(text, log_result=False)
+                menu_ids = {item.menu_id for item in items}
+
+                self.assertNotIn("cola_01", menu_ids)
+
+    def test_llm_validation_allows_response_without_excluded_menu(self):
+        raw = '[{"menu_id": "burger_01", "quantity": 1, "options": []}]'
+
+        items = _parse_llm_response(raw, "햄버거 하나 콜라 빼고 주세요")
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].menu_id, "burger_01")
+
     def test_keyword_fallback_does_not_read_igeo_as_quantity_two(self):
         items = _fallback_keyword_parse("콜라 이거 주세요", log_result=False)
 
