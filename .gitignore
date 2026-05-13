@@ -1,11 +1,73 @@
-# 보안 파일 (API 키 등 절대 올리지 말 것)
+# API 키 같은 로컬 설정 파일
 .env
+.env.*
+!.env.example
 
-# 파이썬 캐시 쓰레기
+# 파이썬 캐시
 __pycache__/
 */__pycache__/*
 *.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
 
-# 로컬 테스트용 거대 파일
+# 로컬 가상환경
+venv/
+venv311/
+venv312/
+.venv/
+.venv311/
+.venv312/
+env/
+
+# 로컬 테스트용 파일
 *.wav
+*.mp3
+*.m4a
+*.ogg
+*.webm
+*.flac
+*.mp4
 *.zip
+test*.jpg
+test*.jpeg
+test*.png
+test*.webp
+
+# 로컬 로그/모델 캐시
+*.log
+nohup.out
+logs/
+.cache/
+.deepface/
+.keras/
+.cache/huggingface/
+.cache/torch/
+weights/
+*.ckpt
+*.h5
+*.onnx
+*.pt
+*.pth
+
+# OS / 에디터 파일
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tmp
+
+# 로컬 작업 메모
+AGENTS.md

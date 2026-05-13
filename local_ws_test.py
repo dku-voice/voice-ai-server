@@ -1,12 +1,12 @@
 """
-local_ws_test.py - V2.0 WebSocket 로컬 자체 테스트 스크립트
-.wav 파일을 읽어서 chunk 단위로 WebSocket에 보내고 결과 확인
+local_ws_test.py - WebSocket 로컬 테스트 스크립트
+.wav 파일을 chunk로 나눠서 서버에 보내고 응답을 확인한다.
 
 사용법:
     python local_ws_test.py test_audio.wav
     python local_ws_test.py   (기본: test.wav)
 
-서버가 먼저 실행되어 있어야 함:
+서버를 먼저 켜둬야 함:
     uvicorn main:app --reload
 """
 import asyncio
@@ -16,20 +16,25 @@ import wave
 
 import websockets
 
+from app.config import configure_console_encoding
 
-# --- 설정 ---
+
+configure_console_encoding()
+
+
+# 설정
 WS_URL = "ws://localhost:8000/ws/audio"
 CHUNK_SIZE = 4096  # bytes 단위 (프론트엔드 마이크 chunk랑 비슷하게)
 
 
 def read_wav_file(filepath: str) -> tuple[bytes, int]:
     """
-    .wav 파일 읽어서 raw PCM bytes + sample rate 반환
+    .wav 파일을 읽어서 raw PCM bytes와 sample rate를 돌려준다.
     
-    # wav 파일 포맷 주의:
+    # wav 파일 포맷:
     # 16-bit PCM, mono, 16kHz여야 VAD가 제대로 동작함
     # 다른 포맷이면 ffmpeg로 변환 필요:
-    # ffmpeg -i input.wav -ar 16000 -ac 1 -f s16le output.wav
+    # ffmpeg -i input.wav -ar 16000 -ac 1 -sample_fmt s16 output.wav
     """
     print(f">>> 파일 열기: {filepath}")
 
@@ -45,24 +50,22 @@ def read_wav_file(filepath: str) -> tuple[bytes, int]:
     print(f">>> 총 바이트: {len(raw_data)} bytes")
 
     if channels != 1:
-        print(f"⚠️  경고: 모노(1ch)가 아님! ({channels}ch) → VAD 결과 이상할 수 있음")
+        print(f">>> 경고: 모노(1ch)가 아님 ({channels}ch) - VAD 결과가 이상할 수 있음")
     if framerate != 16000:
-        print(f"⚠️  경고: 16kHz가 아님! ({framerate}Hz) → Silero VAD는 16kHz만 지원")
+        print(f">>> 경고: 16kHz가 아님 ({framerate}Hz) - Silero VAD는 16kHz만 지원")
 
     return raw_data, framerate
 
 
 def pretty_print_result(result: dict):
-    """결과 예쁘게 출력"""
+    """서버 응답을 보기 좋게 출력한다."""
     print()
     print("=" * 60)
     print("📋 V2.0 파이프라인 처리 결과")
     print("=" * 60)
 
     status = result.get("status", "unknown")
-    status_emoji = {"success": "✅", "fallback": "⚠️", "error": "❌", "deprecated": "🚫"}.get(status, "❓")
-
-    print(f"  상태: {status_emoji} {status}")
+    print(f"  상태: {status}")
     print(f"  인식 텍스트: \"{result.get('recognized_text', '')}\"")
 
     items = result.get("items", [])
@@ -83,16 +86,16 @@ def pretty_print_result(result: dict):
 
 
 async def test_websocket(filepath: str):
-    """WebSocket 연결 → chunk 전송 → 결과 수신"""
+    """WebSocket 연결 후 chunk를 보내고 결과를 받는다."""
     raw_data, sample_rate = read_wav_file(filepath)
 
     print(f"\n>>> WebSocket 연결 중: {WS_URL}")
 
     try:
         async with websockets.connect(WS_URL) as ws:
-            print(">>> 연결 성공! ✅")
+            print(">>> 연결 성공")
 
-            # chunk 단위로 전송 (프론트 마이크 스트리밍 시뮬레이션)
+            # 프론트 마이크 스트리밍처럼 chunk 단위로 보낸다.
             total_chunks = (len(raw_data) + CHUNK_SIZE - 1) // CHUNK_SIZE
             print(f">>> 총 {total_chunks}개 청크로 분할 전송 (chunk size: {CHUNK_SIZE} bytes)")
             print()
@@ -116,7 +119,7 @@ async def test_websocket(filepath: str):
             result = json.loads(response)
             pretty_print_result(result)
 
-            # raw JSON도 출력 (디버그용)
+            # 디버그용 raw JSON
             print("📄 Raw JSON:")
             print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -131,7 +134,7 @@ async def test_websocket(filepath: str):
 
 
 if __name__ == "__main__":
-    # 커맨드라인 인자로 wav 파일 경로 받기
+    # 인자가 없으면 test.wav를 사용한다.
     wav_file = sys.argv[1] if len(sys.argv) > 1 else "test.wav"
 
     print()

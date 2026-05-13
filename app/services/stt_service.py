@@ -2,18 +2,16 @@
 app/services/stt_service.py - faster-whisper 기반 STT 서비스
 v1.0의 openai-whisper에서 faster-whisper(CTranslate2)로 교체
 
-# 🚨 주의: v1.0에서 메인 스레드 블로킹으로 서버 뻗어서 비동기 처리 도입함
-# model.transcribe()가 CPU에서 5~10초 걸리는데
-# FastAPI의 async 핸들러에서 동기로 호출하면 이벤트 루프가 멈춤
-# → 다른 클라이언트 요청 전부 대기 → 서버 먹통
-# → run_in_threadpool로 별도 스레드에서 실행하도록 수정
+처음에는 transcribe를 async 핸들러 안에서 바로 불렀는데,
+CPU에서 몇 초씩 걸리면서 다른 요청도 같이 멈췄다.
+그래서 실제 STT 호출은 threadpool에서 돌린다.
 """
 import numpy as np
 import logging
 import io
+import threading
 import soundfile as sf
 from faster_whisper import WhisperModel
-from starlette.concurrency import run_in_threadpool
 
 from app.config import (
     WHISPER_MODEL_SIZE,
@@ -21,112 +19,140 @@ from app.config import (
     WHISPER_COMPUTE_TYPE,
     STT_LANGUAGE,
 )
+from app.services.threadpool import run_model_task
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================
-# 전역 싱글톤 모델
-# 서버 시작할 때 한 번만 로드 (매 요청마다 로드하면 메모리 터짐)
-# ============================================
+# 모델은 전역으로 하나만 둔다.
+# 요청마다 새로 로드하면 너무 느리고 메모리도 많이 쓴다.
 _whisper_model: WhisperModel | None = None
+_whisper_model_error: str | None = None
+_whisper_model_lock = threading.Lock()
+_whisper_transcribe_lock = threading.Lock()
 
 
 def load_model():
     """
-    서버 startup 시 호출 - 모델을 전역으로 올림
-    main.py (혹은 app factory)에서 lifespan으로 호출해야 함
+    서버 시작할 때 STT 모델을 미리 올린다.
+    실패해도 서버 자체는 켜지고, 실제 STT 요청에서 에러를 돌려준다.
     """
-    global _whisper_model
+    global _whisper_model, _whisper_model_error
     if _whisper_model is not None:
-        print("[STT] 모델 이미 로딩되어 있음, skip")
+        logger.info("[STT] 모델 이미 로딩되어 있음, skip")
         return
 
-    print(f"[STT] faster-whisper 모델 로딩: size={WHISPER_MODEL_SIZE}, "
-          f"device={WHISPER_DEVICE}, compute={WHISPER_COMPUTE_TYPE}")
+    with _whisper_model_lock:
+        if _whisper_model is not None:
+            logger.info("[STT] 모델 이미 로딩되어 있음, skip")
+            return
 
-    _whisper_model = WhisperModel(
-        WHISPER_MODEL_SIZE,
-        device=WHISPER_DEVICE,
-        compute_type=WHISPER_COMPUTE_TYPE,
-    )
-    print("[STT] 모델 로딩 완료!")
+        logger.info(
+            "[STT] faster-whisper 모델 로딩: size=%s, device=%s, compute=%s",
+            WHISPER_MODEL_SIZE,
+            WHISPER_DEVICE,
+            WHISPER_COMPUTE_TYPE,
+        )
+
+        try:
+            _whisper_model = WhisperModel(
+                WHISPER_MODEL_SIZE,
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE_TYPE,
+            )
+        except Exception as e:
+            _whisper_model_error = str(e)
+            logger.error("[STT] 모델 로딩 실패: %s", e, exc_info=True)
+            raise
+
+        _whisper_model_error = None
+        logger.info("[STT] 모델 로딩 완료!")
 
 
 def _get_model() -> WhisperModel:
-    """모델 가져오기 (없으면 에러)"""
+    """로드된 STT 모델을 가져온다."""
     if _whisper_model is None:
-        raise RuntimeError("[STT] 모델이 로딩 안 됨! 서버 startup에서 load_model() 호출 필요")
+        try:
+            load_model()
+        except Exception as e:
+            detail = _whisper_model_error or str(e)
+            raise RuntimeError(f"[STT] 모델 로딩 실패: {detail}") from e
+    if _whisper_model is None:
+        raise RuntimeError("[STT] 모델 로딩 상태가 올바르지 않습니다.")
     return _whisper_model
+
+
+def get_model_status() -> dict:
+    """헬스체크에서 보여줄 STT 모델 상태."""
+    return {
+        "ready": _whisper_model is not None,
+        "error": _whisper_model_error,
+    }
 
 
 def _transcribe_sync(audio_data: np.ndarray) -> str:
     """
-    동기 transcribe (이걸 직접 async 핸들러에서 부르면 서버 뻗음!!)
+    실제 faster-whisper 호출.
+    이 함수는 무거우므로 async 핸들러에서 바로 부르면 안 된다.
 
     audio_data: float32 numpy array (VAD에서 넘어옴)
     returns: 인식된 텍스트
     """
     model = _get_model()
 
-    # faster-whisper는 파일 경로 or ndarray 받음
-    # v1.0에선 디스크에 임시파일 저장했는데, v2.0에선 메모리에서 바로 처리
-    # ndarray를 직접 넘기면 됨 (이게 훨씬 빠름)
-    segments, info = model.transcribe(
-        audio_data,
-        language=STT_LANGUAGE,
-        beam_size=5,  # 정확도 올리려면 beam_size 키우면 되는데 느려짐
-    )
+    with _whisper_transcribe_lock:
+        # v1.0처럼 임시 파일을 만들지 않고 ndarray를 바로 넘긴다.
+        segments, info = model.transcribe(
+            audio_data,
+            language=STT_LANGUAGE,
+            beam_size=5,  # 올리면 조금 더 정확할 수 있지만 느려진다.
+        )
 
-    # segments는 generator라서 list로 모아야 함
-    text_parts = []
-    for seg in segments:
-        text_parts.append(seg.text.strip())
+        # segments는 generator라 실제 추론이 순회 시점에 일어날 수 있다.
+        text_parts = []
+        for seg in segments:
+            text_parts.append(seg.text.strip())
 
     result_text = " ".join(text_parts).strip()
 
-    logger.info(f"[STT] 인식 결과: '{result_text}' (lang={info.language}, prob={info.language_probability:.2f})")
+    logger.info(
+        "[STT] 인식 결과: '%s' (lang=%s, prob=%.2f)",
+        result_text,
+        info.language,
+        info.language_probability,
+    )
     return result_text
 
 
 async def transcribe(audio_data: np.ndarray) -> str:
     """
-    ✅ 비동기 transcribe - FastAPI 핸들러에서는 이걸 사용!!
-
-    run_in_threadpool: Starlette 내장 함수
-    내부적으로 anyio thread pool 사용해서 동기 함수를 별도 스레드에서 실행
-    → 메인 이벤트 루프 블로킹 안 됨 → 서버 안 뻗음
-
-    # v1.0 실수: model.transcribe()를 async 함수 안에서 그냥 호출
-    # → uvicorn 워커 1개일 때 동시 요청 들어오면 뒤에 요청 timeout
-    # → 교수님한테 "왜 서버 느려요?" 라고 혼남 ㅋㅋ
+    FastAPI 쪽에서 쓰는 비동기 wrapper.
+    내부 STT는 동기 함수라 제한된 threadpool로 감싼다.
     """
-    print(f"[STT] 비동기 transcribe 시작 (audio shape: {audio_data.shape})")
+    logger.debug("[STT] 비동기 transcribe 시작 (audio shape: %s)", audio_data.shape)
 
-    result = await run_in_threadpool(_transcribe_sync, audio_data)
+    result = await run_model_task(_transcribe_sync, audio_data)
 
-    print(f"[STT] 결과: {result}")
+    logger.info("[STT] 결과: %s", result)
     return result
 
 
 async def transcribe_bytes(audio_bytes: bytes) -> str:
     """
-    raw bytes에서 바로 STT 돌리는 헬퍼
-    VAD 안 거치고 바로 STT 하고 싶을 때 사용
-    (HTTP endpoint 테스트용으로 유용함)
+    raw bytes를 바로 STT에 넣는 테스트용 함수.
+    WebSocket 실제 흐름에서는 보통 VAD를 먼저 거친다.
     """
     try:
-        # bytes → numpy float32 변환
-        # soundfile로 읽으면 알아서 float32로 변환해줌 (편함)
+        # soundfile이 float32로 변환해준다.
         audio_np, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
 
-        # 모노로 변환 (스테레오면 첫 번째 채널만 사용)
+        # 스테레오면 일단 첫 번째 채널만 쓴다.
         if len(audio_np.shape) > 1:
             audio_np = audio_np[:, 0]
 
         return await transcribe(audio_np)
 
     except Exception as e:
-        print(f"[STT] bytes 변환 에러: {e}")
-        logger.error(f"[STT] transcribe_bytes 실패: {e}")
+        logger.warning("[STT] bytes 변환 에러: %s", e)
+        logger.error("[STT] transcribe_bytes 실패: %s", e)
         raise
