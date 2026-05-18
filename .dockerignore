@@ -53,5 +53,9 @@ weights
 *.pt
 *.pth
 AGENTS.md
+CLAUDE.md
+PROJECT_OVERVIEW.md
+.local-tools
+.claude
 README.md
 tests
