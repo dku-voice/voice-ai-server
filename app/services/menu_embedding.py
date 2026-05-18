@@ -1,13 +1,11 @@
 """
 app/services/menu_embedding.py - 메뉴 메타데이터 hash TF-IDF 임베딩 인덱스
 
-제5주차 RAG 검색 최적화에 쓰는 가벼운 인메모리 임베딩.
-무거운 외부 모델, 네트워크 임베딩 API, 벡터 DB 의존성은 일부러 안 쓴다.
-학생 프로젝트라 SHA1 해시 + 문자 bigram + IDF 가중으로 단순하게 둔다.
-
-키워드 매치가 못 잡는 부분 일치/동의어 입력도 후보로 끌어올리는 게 목적.
+처음에는 키워드 매치만 썼는데 `후렌치` 같은 별칭 일부만 입력하면
+fries가 후보로 잘 안 올라왔다. 외부 임베딩 API나 벡터 DB까지 붙이기는
+5주차 범위가 커지는 것 같아서, SHA1 해시 + 문자 bigram + IDF 가중으로
+보조 점수만 만든다.
 """
-from __future__ import annotations
 
 import hashlib
 import re
@@ -78,8 +76,7 @@ def _to_unit_vector(counter: Counter, idf: dict[int, float]) -> dict[int, float]
 def _cosine(left: dict[int, float], right: dict[int, float]) -> float:
     if not left or not right:
         return 0.0
-    smaller, larger = (left, right) if len(left) <= len(right) else (right, left)
-    return sum(value * larger.get(bucket, 0.0) for bucket, value in smaller.items())
+    return sum(value * right.get(bucket, 0.0) for bucket, value in left.items())
 
 
 def embedding_boost(similarity: float) -> int:
