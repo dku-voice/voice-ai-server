@@ -7,6 +7,7 @@ v1.0에서는 HTTP로 파일을 한 번에 받았고, 지금은 WebSocket으로 
 """
 import asyncio
 import logging
+import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import WS_RECEIVE_TIMEOUT_SECONDS
@@ -167,8 +168,15 @@ async def audio_websocket(ws: WebSocket):
                 continue
 
             # ===== Stage 1: VAD (음성 감지) =====
+            # 단계별 소요 시간을 찍어두면 어디서 느려지는지 바로 보인다.
+            chain_start = time.perf_counter()
             logger.info("[WS] Stage 1: VAD 처리 중...")
+            stage_start = chain_start
             vad_result = await detect_speech_async(audio_bytes)
+            logger.info(
+                "[WS] Stage 1 VAD 완료 (소요 %.1fms)",
+                (time.perf_counter() - stage_start) * 1000.0,
+            )
 
             if not vad_result["has_speech"]:
                 logger.info("[WS] VAD: 음성 없음, 무시")
@@ -202,9 +210,14 @@ async def audio_websocket(ws: WebSocket):
 
             # ===== Stage 2: STT (음성 → 텍스트) =====
             logger.info("[WS] Stage 2: STT 처리 중...")
+            stage_start = time.perf_counter()
             try:
                 recognized_text = await transcribe(speech_audio)
-                logger.info("[WS] STT 결과: '%s'", recognized_text)
+                logger.info(
+                    "[WS] Stage 2 STT 완료 (소요 %.1fms): '%s'",
+                    (time.perf_counter() - stage_start) * 1000.0,
+                    recognized_text,
+                )
             except Exception as e:
                 logger.error("[WS] STT 에러: %s", e)
                 await ws.send_json(
@@ -231,7 +244,12 @@ async def audio_websocket(ws: WebSocket):
 
             # ===== Stage 3: LLM (텍스트 → 주문 파싱) =====
             logger.info("[WS] Stage 3: LLM 주문 파싱 중...")
+            stage_start = time.perf_counter()
             llm_result = await extract_order(recognized_text)
+            logger.info(
+                "[WS] Stage 3 LLM 완료 (소요 %.1fms)",
+                (time.perf_counter() - stage_start) * 1000.0,
+            )
 
             # 프론트로 보낼 최종 응답
             response = VoiceOrderResponse(
@@ -242,7 +260,12 @@ async def audio_websocket(ws: WebSocket):
             )
 
             await ws.send_json(response.model_dump())
-            logger.info("[WS] 응답 전송 완료: status=%s, items=%s건", response.status, len(response.items))
+            logger.info(
+                "[WS] 응답 전송 완료: status=%s, items=%s건 (전체 %.1fms)",
+                response.status,
+                len(response.items),
+                (time.perf_counter() - chain_start) * 1000.0,
+            )
 
     except WebSocketDisconnect:
         # 브라우저 탭을 닫거나 네트워크가 끊기면 여기로 온다.

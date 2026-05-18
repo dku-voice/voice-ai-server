@@ -111,6 +111,20 @@ class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["retrieved_menu_ids"], ["cola_01"])
         self.assertEqual(result["recommendations"][0].menu_id, "cola_01")
 
+    async def test_recommend_menus_falls_back_when_llm_response_is_invalid_json(self):
+        # LLM이 좋지 않은 JSON을 돌려줘도 검색된 menu_id 안에서 fallback이 나와야 한다.
+        with patch(
+            "app.services.recommendation_service._call_recommendation_llm_sync",
+            side_effect=LLMResponseValidationError("invalid json"),
+        ):
+            result = await recommend_menus("음료 추천해줘", top_k=1)
+
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(result["retrieved_menu_ids"], ["cola_01"])
+        self.assertEqual(len(result["recommendations"]), 1)
+        self.assertEqual(result["recommendations"][0].menu_id, "cola_01")
+        self.assertIn("LLM", result["error_msg"])
+
     async def test_recommend_menus_returns_error_for_empty_query(self):
         result = await recommend_menus("   ", top_k=1)
 
