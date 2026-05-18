@@ -10,8 +10,8 @@ DKU Capstone 음성 주문 Kiosk 프로젝트에서 사용하는 Python/FastAPI 
 - `POST /api/recommendations/menu`: 메뉴 문서를 검색한 뒤 LLM으로 추천 결과를 만듭니다.
 - `POST /api/voice`: 예전 HTTP 방식입니다. 새 연동은 `/ws/audio`를 씁니다.
 
-현재 브랜치는 팀 계획 3, 4주차 범위인 LLM 3단계 검증, DeepFace 스냅샷 연령 추정, RAG 메뉴 추천 기초 파이프라인을 정리한 상태입니다.
-RAG는 아직 메뉴 DB/벡터 DB 최적화 전 단계입니다. YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 넣지 않았습니다.
+현재 브랜치는 팀 계획 3~5주차 범위인 LLM 3단계 검증, DeepFace 스냅샷 연령 추정, RAG 메뉴 추천 기초 파이프라인과 검색 최적화를 정리한 상태입니다.
+RAG는 서버 안의 메뉴 문서에 hash TF-IDF 기반 임베딩 점수를 더해 후보를 고릅니다. 외부 메뉴 DB나 벡터 DB는 아직 붙이지 않았고, YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 넣지 않았습니다.
 
 ## 기술 스택
 
@@ -39,6 +39,7 @@ voice-ai-server/
 │   │   └── websockets.py
 │   ├── services/
 │   │   ├── llm_service.py
+│   │   ├── menu_embedding.py
 │   │   ├── recommendation_service.py
 │   │   ├── stt_service.py
 │   │   ├── threadpool.py
@@ -210,10 +211,10 @@ Content-Type: application/json
 }
 ```
 
-현재 RAG는 4주차 기초 파이프라인입니다.
-서버 안의 간단한 메뉴 문서를 LangChain Document 형태로 만들고, 키워드 검색으로 후보를 고른 뒤 LLM에 넘깁니다.
+현재 RAG는 5주차 검색 최적화까지 반영한 로컬 파이프라인입니다.
+서버 안의 간단한 메뉴 문서를 LangChain Document 형태로 만들고, 키워드 검색과 메뉴 메타데이터 hash TF-IDF 점수로 후보를 고른 뒤 LLM에 넘깁니다.
 OpenAI API 설정이 없거나 LLM 응답이 깨지면 검색된 메뉴 문서 기준 fallback 추천을 돌려줍니다.
-메뉴 DB 연동, embedding 생성, 벡터 DB 검색 최적화는 5주차 작업으로 남겨둡니다.
+외부 메뉴 DB 연동이나 별도 벡터 DB 검색은 아직 붙이지 않았습니다.
 
 ## Vision API
 

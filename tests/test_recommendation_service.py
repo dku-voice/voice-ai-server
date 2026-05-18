@@ -34,6 +34,26 @@ class RecommendationServiceTest(unittest.TestCase):
 
         self.assertEqual(docs, [])
 
+    def test_retrieve_partial_alias_uses_embedding(self):
+        """`후렌치`처럼 별칭 일부만 입력해도 임베딩 boost로 fries 후보가 노출된다."""
+        docs = retrieve_menu_documents("후렌치 줘", top_k=1)
+        menu_ids = [doc.metadata["menu_id"] for doc in docs]
+
+        self.assertEqual(menu_ids, ["fries_01"])
+
+    def test_retrieve_main_meal_query_prefers_main_category(self):
+        """`메인 식사`류 쿼리는 main 카테고리 메뉴를 위쪽에 둔다."""
+        docs = retrieve_menu_documents("메인 식사로 든든한 거", top_k=3)
+        menu_ids = [doc.metadata["menu_id"] for doc in docs]
+
+        self.assertIn("burger_01", menu_ids)
+        self.assertNotIn(menu_ids[0], {"cola_01", "fries_01"})
+
+    def test_retrieve_top_k_caps_results_to_requested_count(self):
+        docs = retrieve_menu_documents("메뉴 추천해줘", top_k=3)
+
+        self.assertEqual(len(docs), 3)
+
     def test_parse_recommendation_response_fills_name_and_deduplicates(self):
         docs = retrieve_menu_documents("사이드랑 음료 추천해줘", top_k=2)
         raw = """

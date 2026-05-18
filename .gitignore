@@ -73,5 +73,6 @@ Thumbs.db
 AGENTS.md
 PROJECT_OVERVIEW.md
 CLAUDE.md
+.ai-pair-run/
 .local-tools/
 .claude/
