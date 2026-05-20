@@ -10,8 +10,8 @@ DKU Capstone 음성 주문 Kiosk 프로젝트에서 사용하는 Python/FastAPI 
 - `POST /api/recommendations/menu`: 메뉴 문서를 검색한 뒤 LLM으로 추천 결과를 만듭니다.
 - `POST /api/voice`: 예전 HTTP 방식입니다. 새 연동은 `/ws/audio`를 씁니다.
 
-현재 브랜치는 팀 계획 3~5주차 범위인 LLM 3단계 검증, DeepFace 스냅샷 연령 추정, RAG 메뉴 추천 기초 파이프라인과 검색 최적화를 정리한 상태입니다.
-RAG는 서버 안의 메뉴 문서에 hash TF-IDF 기반 임베딩 점수를 더해 후보를 고릅니다. 외부 메뉴 DB나 벡터 DB는 아직 붙이지 않았고, YOLO, 감정 인식, 바코드 스캔은 다음 주차 작업이라 아직 넣지 않았습니다.
+현재 브랜치는 1학기 AI Server 범위인 LLM 3단계 검증, DeepFace 스냅샷 연령 추정, RAG 메뉴 추천 기초 파이프라인, 메뉴 검색 최적화, Week 6 통합 테스트를 정리한 상태입니다.
+RAG는 서버 안의 메뉴 문서에 hash TF-IDF 기반 임베딩 점수를 더해 후보를 고릅니다. 외부 메뉴 DB나 벡터 DB는 아직 붙이지 않았고, YOLO, 감정 인식, 바코드 스캔은 다음 학기 범위라 아직 넣지 않았습니다.
 
 ## 기술 스택
 
@@ -115,6 +115,7 @@ SENIOR_AGE_THRESHOLD=60
 `MODEL_THREAD_LIMIT`는 STT/VAD/DeepFace 같은 로컬 모델 작업 수를 제한합니다.
 `LLM_THREAD_LIMIT`는 OpenAI 호출 작업 수를 제한합니다.
 `VISION_MODEL_RETRY_COOLDOWN_SECONDS`는 DeepFace age 모델 로딩 실패 뒤 바로 재시도하지 않고 기다리는 시간입니다.
+`VISION_WARMUP_ON_STARTUP=true`이면 서버 시작 때 DeepFace age 모델을 미리 올립니다. 개발할 때는 기본값인 `false`가 편하고, 시연이나 배포 전에 첫 vision 요청 지연을 줄이고 싶을 때만 켭니다.
 
 ## 실행
 
@@ -239,6 +240,7 @@ supported image: jpg, jpeg, png, webp
 
 업로드 이미지는 따로 저장하지 않고 요청 안에서 바로 씁니다.
 DeepFace 모델은 기본적으로 첫 요청 때 로딩합니다.
+시연 환경에서 첫 요청 지연을 피하려면 `.env`에 `VISION_WARMUP_ON_STARTUP=true`를 두고, 모델 캐시를 지우지 않는 쪽이 좋습니다.
 
 ## 테스트와 검증
 
@@ -250,6 +252,7 @@ python -m unittest discover -s tests
 python -m compileall app tests scripts main.py local_ws_test.py
 python -c "import main; print('IMPORT_MAIN_OK')"
 python -m pip check
+git diff --check
 ```
 
 모델 weight 다운로드와 실제 로딩은 필요할 때 따로 확인합니다.
@@ -262,6 +265,23 @@ python scripts/warmup_models.py --vision-only --vision-image test.jpg
 ```
 
 `test.jpg`, `test.wav`는 로컬 테스트 파일이며 GitHub에 올리지 않습니다.
+
+2026-05-20 기준 Week 6 PR 전 확인:
+
+- `python -m unittest discover -s tests`: 68 tests OK
+- `python -m compileall app tests scripts main.py local_ws_test.py`: OK
+- `python -c "import main; print('IMPORT_MAIN_OK')"`: OK
+- `python -m pip check`: OK
+- `git diff --check`: OK
+
+로컬에서 `test.wav`와 `test.jpg`로 실제 모델 smoke도 확인했습니다. OpenAI key는 비우고 fallback으로 돌렸고, 격리 캐시는 실행 후 삭제했습니다.
+
+```text
+cold: VAD 157.4ms, STT 11501.6ms, LLM fallback 0.3ms, Vision 20666.1ms
+warm: VAD 11.7ms, STT 395.4ms, LLM fallback 0.3ms, Vision 106.0ms
+```
+
+warm 상태에서는 충분히 짧게 나왔고, 느린 부분은 대부분 모델 다운로드와 cold load입니다. 그래서 지금은 STT `beam_size`, threadpool, RAG 로직을 크게 바꾸기보다 배포/시연 환경에서 모델 캐시와 startup warmup을 유지하는 쪽이 맞습니다.
 
 ## 로컬 WebSocket 테스트
 
@@ -323,13 +343,14 @@ GitHub에 올리지 않는 파일:
 - `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `.mypy_cache/`
 - `test.wav`, `test.jpg`, 기타 로컬 테스트 미디어
 - `.deepface/`, `.keras/`, `.cache/`, `weights/`, 모델 weight 파일
-- `AGENTS.md`
+- `AGENTS.md`, `CLAUDE.md`, `PROJECT_OVERVIEW.md`
+- `.ai-pair-run/`, `.local-tools/`, `.claude/`
 
 PR 전에 아래 명령으로 ignored 상태와 새 소스 파일을 같이 확인합니다.
 
 ```bash
 git status --short --ignored
-git check-ignore -v .env .venv test.wav test.jpg AGENTS.md
+git check-ignore -v .env .venv test.wav test.jpg AGENTS.md CLAUDE.md PROJECT_OVERVIEW.md .local-tools .claude
 git check-ignore -v Dockerfile app/services/llm_service.py tests/test_llm_service.py requirements-linux-cpu.txt || true
 ```
 
