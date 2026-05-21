@@ -71,3 +71,8 @@ Thumbs.db
 
 # 로컬 작업 메모
 AGENTS.md
+PROJECT_OVERVIEW.md
+CLAUDE.md
+.ai-pair-run/
+.local-tools/
+.claude/

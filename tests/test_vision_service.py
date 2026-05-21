@@ -1,6 +1,11 @@
 import io
 import unittest
+from unittest.mock import AsyncMock, patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.vision import router as vision_router
 from app.services import vision_service
 from app.services.vision_service import (
     VisionAnalysisError,
@@ -132,6 +137,77 @@ class VisionServiceTest(unittest.TestCase):
             vision_service._age_model_error = old_error
             vision_service._age_model_retry_after = old_retry_after
             vision_service.VISION_MODEL_RETRY_COOLDOWN_SECONDS = old_cooldown
+
+
+class VisionApiTest(unittest.TestCase):
+    def _build_client(self) -> TestClient:
+        app = FastAPI()
+        app.include_router(vision_router)
+        return TestClient(app)
+
+    def test_analyze_age_route_returns_service_result(self):
+        service_result = {
+            "estimated_age": 65,
+            "age_group": "senior",
+            "is_senior": True,
+        }
+
+        with patch(
+            "app.api.vision.analyze_age",
+            new=AsyncMock(return_value=service_result),
+        ):
+            response = self._build_client().post(
+                "/api/vision/analyze_age",
+                files={"file": ("snap.jpg", b"fake-jpg-bytes", "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["estimated_age"], 65)
+        self.assertEqual(body["age_group"], "senior")
+        self.assertTrue(body["is_senior"])
+        self.assertIsNone(body["error_msg"])
+
+    def test_analyze_age_route_rejects_unsupported_content_type(self):
+        response = self._build_client().post(
+            "/api/vision/analyze_age",
+            files={"file": ("snap.bmp", b"fake-bytes", "image/bmp")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertIn("지원하지 않는 이미지", body["error_msg"])
+
+    def test_analyze_age_route_rejects_oversized_file(self):
+        oversized_bytes = b"\x00" * 16
+
+        with patch("app.api.vision.VISION_MAX_IMAGE_BYTES", 8):
+            response = self._build_client().post(
+                "/api/vision/analyze_age",
+                files={"file": ("snap.jpg", oversized_bytes, "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertIn("이미지 파일이 너무 큽니다", body["error_msg"])
+
+    def test_analyze_age_route_handles_service_analysis_error(self):
+        with patch(
+            "app.api.vision.analyze_age",
+            new=AsyncMock(side_effect=VisionAnalysisError("얼굴을 찾지 못했습니다.")),
+        ):
+            response = self._build_client().post(
+                "/api/vision/analyze_age",
+                files={"file": ("snap.jpg", b"fake-jpg-bytes", "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["error_msg"], "얼굴을 찾지 못했습니다.")
 
 
 if __name__ == "__main__":

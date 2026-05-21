@@ -1,9 +1,10 @@
 """
-app/services/recommendation_service.py - 메뉴 추천 RAG 기초 파이프라인
+app/services/recommendation_service.py - 메뉴 추천 RAG 파이프라인
 
-지금 단계에서는 메뉴 DB나 벡터 DB까지 붙이지 않는다.
+메뉴 DB나 외부 벡터 DB까지는 아직 안 붙인다.
 현재 서버가 알고 있는 menu_id를 LangChain Document 형태로 만들고,
-간단한 키워드 검색 결과만 LLM에 넘겨 추천 JSON을 받는다.
+키워드 매치 + 본문 토큰 + 메뉴 메타데이터 기반 해시 TF-IDF 임베딩 점수를
+합쳐서 후보를 정렬한 뒤 LLM에 넘겨 추천 JSON을 받는다.
 """
 import json
 import logging
@@ -20,6 +21,7 @@ from app.services.llm_service import (
     MENU_CATALOG,
     get_llm_client,
 )
+from app.services.menu_embedding import MenuEmbeddingIndex, embedding_boost
 from app.services.threadpool import run_llm_task
 
 logger = logging.getLogger(__name__)
@@ -147,7 +149,21 @@ def build_menu_documents() -> list[MenuDocument]:
 _MENU_DOCUMENTS = build_menu_documents()
 
 
-def _score_document(query: str, document: MenuDocument) -> int:
+def _embedding_source(document: MenuDocument) -> str:
+    """임베딩 인덱스에 넣을 메뉴 메타데이터 텍스트. 설명문은 일부러 빼고 정형 필드만 쓴다."""
+    return " ".join(document.metadata["search_terms"])
+
+
+_MENU_EMBEDDING_INDEX = MenuEmbeddingIndex(
+    [(document.metadata["menu_id"], _embedding_source(document)) for document in _MENU_DOCUMENTS]
+)
+
+
+def _score_document(
+    query: str,
+    query_vector: dict[int, float],
+    document: MenuDocument,
+) -> int:
     normalized_query = _normalize_text(query)
     if not normalized_query:
         return 0
@@ -163,6 +179,9 @@ def _score_document(query: str, document: MenuDocument) -> int:
         if len(token) >= 2 and token in content:
             score += 1
 
+    similarity = _MENU_EMBEDDING_INDEX.similarity(query_vector, document.metadata["menu_id"])
+    score += embedding_boost(similarity)
+
     return score
 
 
@@ -174,15 +193,17 @@ def _looks_like_recommendation_query(query: str) -> bool:
 def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
     """
     메뉴 문서 검색.
-    제5주차의 embedding/vector DB 최적화 전까지는 간단한 키워드 점수로만 고른다.
+    제5주차 RAG 검색 최적화: 키워드 매치 + 본문 토큰 + 메뉴 메타데이터 기반
+    해시 TF-IDF 코사인 유사도를 합쳐서 후보 순서를 만든다.
     """
     query = query.strip()
     if not query:
         return []
 
     documents = _MENU_DOCUMENTS
+    query_vector = _MENU_EMBEDDING_INDEX.query_vector(query)
     scored = [
-        (_score_document(query, document), index, document)
+        (_score_document(query, query_vector, document), index, document)
         for index, document in enumerate(documents)
     ]
     matched = [item for item in scored if item[0] > 0]
