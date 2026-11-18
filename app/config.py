@@ -72,8 +72,12 @@ WHISPER_DEVICE = "cpu" if DISABLE_GPU else os.getenv("WHISPER_DEVICE", "cpu")
 # float16은 GPU용이라 CPU에서 쓰면 에러가 난다.
 WHISPER_COMPUTE_TYPE = "int8" if DISABLE_GPU else os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 
-# STT 언어 (한국어 고정)
-STT_LANGUAGE = "ko"
+# STT 언어 (비워두면 자동 감지, "ko" 등을 넣으면 해당 언어로 고정)
+STT_LANGUAGE = os.getenv("STT_LANGUAGE") or None
+
+SUPPORTED_LANGUAGES = ("ko", "ja", "es", "th")
+DEFAULT_LANGUAGE = "ko"
+LANGUAGE_MIN_PROBABILITY = _get_float_env("LANGUAGE_MIN_PROBABILITY", 0.5)
 
 
 # --- VAD 설정 ---

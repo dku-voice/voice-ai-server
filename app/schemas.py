@@ -21,6 +21,7 @@ class VoiceOrderResponse(BaseModel):
     recognized_text: str = Field(..., description="STT 인식 텍스트")
     items: List[OrderItem] = Field(default=[], description="주문 항목")
     error_msg: Optional[str] = Field(default=None, description="에러 메시지")
+    language: str = Field(default="ko", description="감지된 발화 언어 'ko' | 'ja' | 'es' | 'th'")
 
 
 class AgeAnalysisResponse(BaseModel):

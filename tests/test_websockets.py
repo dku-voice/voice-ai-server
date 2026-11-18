@@ -82,7 +82,7 @@ class WebSocketAudioTest(unittest.TestCase):
             "app.api.websockets.detect_speech_async",
             new=AsyncMock(return_value=vad_result),
         ), patch(
-            "app.api.websockets.transcribe",
+            "app.api.websockets.transcribe_with_language",
             new=AsyncMock(side_effect=RuntimeError("decoder boom")),
         ):
             with TestClient(_build_app()).websocket_connect("/ws/audio") as ws:
@@ -111,8 +111,8 @@ class WebSocketAudioTest(unittest.TestCase):
             "app.api.websockets.detect_speech_async",
             new=AsyncMock(return_value=vad_result),
         ), patch(
-            "app.api.websockets.transcribe",
-            new=AsyncMock(return_value="콜라 하나 주세요"),
+            "app.api.websockets.transcribe_with_language",
+            new=AsyncMock(return_value=("콜라 하나 주세요", "ko")),
         ), patch(
             "app.api.websockets.extract_order",
             new=AsyncMock(return_value=llm_result),
@@ -128,6 +128,34 @@ class WebSocketAudioTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["menu_id"], "cola_01")
         self.assertEqual(result["items"][0]["quantity"], 1)
         self.assertIsNone(result["error_msg"])
+        self.assertEqual(result["language"], "ko")
+
+    def test_detected_language_is_returned(self):
+        audio_bytes = np.zeros(3200, dtype=np.int16).tobytes()
+        vad_result = {
+            "has_speech": True,
+            "speech_audio": np.zeros(3200, dtype=np.float32),
+            "confidence": 0.99,
+        }
+        llm_result = {"status": "fallback", "items": [], "error_msg": None}
+
+        with patch(
+            "app.api.websockets.detect_speech_async",
+            new=AsyncMock(return_value=vad_result),
+        ), patch(
+            "app.api.websockets.transcribe_with_language",
+            new=AsyncMock(return_value=("コーラをください", "ja")),
+        ), patch(
+            "app.api.websockets.extract_order",
+            new=AsyncMock(return_value=llm_result),
+        ):
+            with TestClient(_build_app()).websocket_connect("/ws/audio") as ws:
+                ws.send_bytes(audio_bytes)
+                ws.send_text("END")
+                result = ws.receive_json()
+
+        self.assertEqual(result["recognized_text"], "コーラをください")
+        self.assertEqual(result["language"], "ja")
 
 
 if __name__ == "__main__":

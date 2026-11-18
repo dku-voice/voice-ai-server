@@ -18,6 +18,9 @@ from app.config import (
     WHISPER_DEVICE,
     WHISPER_COMPUTE_TYPE,
     STT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
+    DEFAULT_LANGUAGE,
+    LANGUAGE_MIN_PROBABILITY,
 )
 from app.services.threadpool import run_model_task
 
@@ -90,25 +93,56 @@ def get_model_status() -> dict:
     }
 
 
-def _transcribe_sync(audio_data: np.ndarray) -> str:
+def _pick_language(info) -> str:
+    detected = info.language
+    probability = info.language_probability or 0.0
+
+    if detected not in SUPPORTED_LANGUAGES:
+        candidates = [
+            (lang, prob)
+            for lang, prob in (getattr(info, "all_language_probs", None) or [])
+            if lang in SUPPORTED_LANGUAGES
+        ]
+        if not candidates:
+            return DEFAULT_LANGUAGE
+        detected, probability = max(candidates, key=lambda c: c[1])
+
+    if detected != DEFAULT_LANGUAGE and probability < LANGUAGE_MIN_PROBABILITY:
+        return DEFAULT_LANGUAGE
+    return detected
+
+
+def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
     """
     실제 faster-whisper 호출.
     이 함수는 무거우므로 async 핸들러에서 바로 부르면 안 된다.
 
     audio_data: float32 numpy array (VAD에서 넘어옴)
-    returns: 인식된 텍스트
+    returns: (인식된 텍스트, 언어 코드)
     """
     model = _get_model()
 
     with _whisper_transcribe_lock:
-        # v1.0처럼 임시 파일을 만들지 않고 ndarray를 바로 넘긴다.
         segments, info = model.transcribe(
             audio_data,
             language=STT_LANGUAGE,
-            beam_size=5,  # 올리면 조금 더 정확할 수 있지만 느려진다.
+            beam_size=5,
         )
 
-        # segments는 generator라 실제 추론이 순회 시점에 일어날 수 있다.
+        language = STT_LANGUAGE or _pick_language(info)
+        if language != info.language:
+            logger.info(
+                "[STT] 감지 언어 %s(prob=%.2f) 대신 %s로 다시 인식",
+                info.language,
+                info.language_probability,
+                language,
+            )
+            segments, info = model.transcribe(
+                audio_data,
+                language=language,
+                beam_size=5,
+            )
+
         text_parts = []
         for seg in segments:
             text_parts.append(seg.text.strip())
@@ -118,23 +152,28 @@ def _transcribe_sync(audio_data: np.ndarray) -> str:
     logger.info(
         "[STT] 인식 결과: '%s' (lang=%s, prob=%.2f)",
         result_text,
-        info.language,
+        language,
         info.language_probability,
     )
-    return result_text
+    return result_text, language
 
 
-async def transcribe(audio_data: np.ndarray) -> str:
+async def transcribe_with_language(audio_data: np.ndarray) -> tuple[str, str]:
     """
     FastAPI 쪽에서 쓰는 비동기 wrapper.
     내부 STT는 동기 함수라 제한된 threadpool로 감싼다.
     """
     logger.debug("[STT] 비동기 transcribe 시작 (audio shape: %s)", audio_data.shape)
 
-    result = await run_model_task(_transcribe_sync, audio_data)
+    text, language = await run_model_task(_transcribe_sync, audio_data)
 
-    logger.info("[STT] 결과: %s", result)
-    return result
+    logger.info("[STT] 결과: %s (lang=%s)", text, language)
+    return text, language
+
+
+async def transcribe(audio_data: np.ndarray) -> str:
+    text, _ = await transcribe_with_language(audio_data)
+    return text
 
 
 async def transcribe_bytes(audio_bytes: bytes) -> str:

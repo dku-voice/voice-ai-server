@@ -13,7 +13,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.config import WS_RECEIVE_TIMEOUT_SECONDS
 from app.schemas import VoiceOrderResponse
 from app.services.vad_service import detect_speech_async, bytes_to_float32
-from app.services.stt_service import transcribe
+from app.services.stt_service import transcribe_with_language
 from app.services.llm_service import extract_order
 
 logger = logging.getLogger(__name__)
@@ -212,11 +212,12 @@ async def audio_websocket(ws: WebSocket):
             logger.info("[WS] Stage 2: STT 처리 중...")
             stage_start = time.perf_counter()
             try:
-                recognized_text = await transcribe(speech_audio)
+                recognized_text, language = await transcribe_with_language(speech_audio)
                 logger.info(
-                    "[WS] Stage 2 STT 완료 (소요 %.1fms): '%s'",
+                    "[WS] Stage 2 STT 완료 (소요 %.1fms): '%s' (lang=%s)",
                     (time.perf_counter() - stage_start) * 1000.0,
                     recognized_text,
+                    language,
                 )
             except Exception as e:
                 logger.error("[WS] STT 에러: %s", e)
@@ -238,6 +239,7 @@ async def audio_websocket(ws: WebSocket):
                         recognized_text="",
                         items=[],
                         error_msg=None,
+                        language=language,
                     ).model_dump()
                 )
                 continue
@@ -257,6 +259,7 @@ async def audio_websocket(ws: WebSocket):
                 recognized_text=recognized_text,
                 items=llm_result["items"],
                 error_msg=llm_result.get("error_msg"),
+                language=language,
             )
 
             await ws.send_json(response.model_dump())
