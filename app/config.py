@@ -110,7 +110,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 USE_GEMINI = bool(GEMINI_API_KEY.strip())
 LLM_API_KEY = GEMINI_API_KEY if USE_GEMINI else OPENAI_API_KEY
 LLM_BASE_URL = GEMINI_BASE_URL if USE_GEMINI else None
-LLM_MODEL = os.getenv("LLM_MODEL") or ("gemini-2.5-flash" if USE_GEMINI else "gpt-4o-mini")
+LLM_MODEL = os.getenv("LLM_MODEL") or ("gemini-3.1-flash-lite" if USE_GEMINI else "gpt-4o-mini")
 LLM_MAX_TOKENS = _get_int_env("LLM_MAX_TOKENS", 1024)
 LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "").strip()
 
