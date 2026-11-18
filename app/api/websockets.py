@@ -247,7 +247,7 @@ async def audio_websocket(ws: WebSocket):
             # ===== Stage 3: LLM (텍스트 → 주문 파싱) =====
             logger.info("[WS] Stage 3: LLM 주문 파싱 중...")
             stage_start = time.perf_counter()
-            llm_result = await extract_order(recognized_text)
+            llm_result = await extract_order(recognized_text, language)
             logger.info(
                 "[WS] Stage 3 LLM 완료 (소요 %.1fms)",
                 (time.perf_counter() - stage_start) * 1000.0,

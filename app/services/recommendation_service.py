@@ -19,6 +19,7 @@ from app.services.llm_service import (
     LLMResponseValidationError,
     MENU_ALIASES,
     MENU_CATALOG,
+    completion_options,
     get_llm_client,
 )
 from app.services.menu_embedding import MenuEmbeddingIndex, embedding_boost
@@ -314,7 +315,7 @@ def _call_recommendation_llm_sync(
             },
         ],
         temperature=0.2,
-        max_tokens=500,
+        **completion_options(),
     )
 
     raw = response.choices[0].message.content

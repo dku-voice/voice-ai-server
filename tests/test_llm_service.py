@@ -211,6 +211,38 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(completions.calls, 1)
         self.assertEqual(items[0].menu_id, "cola_01")
 
+    def test_foreign_language_order_skips_korean_keyword_check(self):
+        raw = '[{"menu_id": "cola_01", "quantity": 2, "options": []}]'
+        items = _parse_llm_response(raw, "コーラをふたつください", "ja")
+        self.assertEqual(items[0].menu_id, "cola_01")
+        self.assertEqual(items[0].quantity, 2)
+
+    def test_foreign_language_order_still_rejects_unknown_menu(self):
+        raw = '[{"menu_id": "sushi_99", "quantity": 1, "options": []}]'
+        with self.assertRaises(LLMResponseValidationError):
+            _parse_llm_response(raw, "寿司をください", "ja")
+
+    def test_foreign_language_prompt_includes_language(self):
+        captured = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                content = '[{"menu_id": "zero-cola", "quantity": 1, "options": []}]'
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+                )
+
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+        with patch("app.services.llm_service._get_client", return_value=fake_client):
+            phase, items = _call_llm_sync("una coca cola zero, por favor", "es")
+
+        self.assertEqual(phase, "success")
+        self.assertEqual(items[0].menu_id, "zero-cola")
+        self.assertIn("스페인어", captured["messages"][1]["content"])
+        self.assertIn("max_tokens", captured)
+
 
 if __name__ == "__main__":
     unittest.main()
