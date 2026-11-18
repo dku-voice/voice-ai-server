@@ -243,6 +243,17 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertIn("스페인어", captured["messages"][1]["content"])
         self.assertIn("max_tokens", captured)
 
+    def test_korean_order_uses_keyword_matching_without_llm(self):
+        import asyncio
+        from app.services.llm_service import extract_order
+
+        with patch("app.services.llm_service._get_client", side_effect=AssertionError("LLM called")):
+            result = asyncio.run(extract_order("클래식 버거 한 개랑 콜라 두 개", "ko"))
+
+        self.assertEqual(result["status"], "success")
+        quantities = {item.menu_id: item.quantity for item in result["items"]}
+        self.assertEqual(quantities, {"classic-burger": 1, "cola_01": 2})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,10 @@ from app.config import (
     LLM_BASE_URL,
     LLM_MAX_TOKENS,
     LLM_MODEL,
+    LLM_MAX_RETRIES,
     LLM_REASONING_EFFORT,
+    LLM_SKIP_KOREAN,
+    LLM_TIMEOUT_SECONDS,
     USE_GEMINI,
 )
 from app.schemas import OrderItem
@@ -61,7 +64,8 @@ def _get_client() -> OpenAI:
                 _client = OpenAI(
                     api_key=api_key,
                     base_url=LLM_BASE_URL,
-                    timeout=Timeout(30.0, connect=10.0),
+                    timeout=Timeout(LLM_TIMEOUT_SECONDS, connect=5.0),
+                    max_retries=LLM_MAX_RETRIES,
                 )
     return _client
 
@@ -614,6 +618,14 @@ async def extract_order(text: str, language: str = "ko") -> dict:
             "items": [],
             "error_msg": None,
         }
+
+    if language == "ko" and LLM_SKIP_KOREAN:
+        try:
+            items = _fallback_keyword_parse(text)
+            return {"status": "success", "items": items, "error_msg": None}
+        except Exception as e:
+            logger.error("[LLM] 한국어 키워드 매칭 실패: %s", e)
+            return {"status": "error", "items": [], "error_msg": "주문 처리 중 오류가 발생했습니다"}
 
     try:
         # LLM 호출도 블로킹이라 threadpool에서 실행한다.

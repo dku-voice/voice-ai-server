@@ -113,6 +113,9 @@ LLM_BASE_URL = GEMINI_BASE_URL if USE_GEMINI else None
 LLM_MODEL = os.getenv("LLM_MODEL") or ("gemini-3.1-flash-lite" if USE_GEMINI else "gpt-4o-mini")
 LLM_MAX_TOKENS = _get_int_env("LLM_MAX_TOKENS", 1024)
 LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "").strip()
+LLM_TIMEOUT_SECONDS = _get_float_env("LLM_TIMEOUT_SECONDS", 6.0, min_value=1.0)
+LLM_MAX_RETRIES = _get_int_env("LLM_MAX_RETRIES", 1)
+LLM_SKIP_KOREAN = _get_bool_env("LLM_SKIP_KOREAN", "true")
 
 
 # --- Vision / DeepFace 설정 ---
