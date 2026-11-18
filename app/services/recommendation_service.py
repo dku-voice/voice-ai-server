@@ -62,12 +62,6 @@ MENU_RECOMMENDATION_PROFILES = [
         "description": "감자튀김 사이드 메뉴. 메인 메뉴와 함께 추가하기 좋습니다.",
     },
     {
-        "menu_id": "pizza_01",
-        "category": "main",
-        "tags": ("식사", "피자", "나눠먹기", "메인"),
-        "description": "피자 메뉴. 여러 사람이 나눠 먹기 좋은 메인 메뉴입니다.",
-    },
-    {
         "menu_id": "chicken_01",
         "category": "main",
         "tags": ("식사", "치킨", "나눠먹기", "메인"),
