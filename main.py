@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.recommendations import router as recommendations_router
+from app.api.menus import router as menus_router
+from app.services.menu_sync import start_menu_sync, stop_menu_sync
 from app.api.vision import router as vision_router
 from app.api.websockets import router as ws_router
 from app.config import VISION_WARMUP_ON_STARTUP
@@ -66,12 +68,14 @@ async def lifespan(app: FastAPI):
         app.state.vision_error = None
         logger.info("[Startup] DeepFace 모델은 첫 vision 요청 시 로딩됨 (lazy)")
 
+    start_menu_sync()
     logger.info("[Startup] 서버 준비 완료")
 
     yield
 
     # === Shutdown ===
     logger.info("[Shutdown] 서버 종료 중...")
+    stop_menu_sync()
     logger.info("서버 정상 종료")
 
 
@@ -87,6 +91,7 @@ app = FastAPI(
 app.include_router(ws_router)
 app.include_router(vision_router)
 app.include_router(recommendations_router)
+app.include_router(menus_router)
 
 
 # 예전 HTTP API.

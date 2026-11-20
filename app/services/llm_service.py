@@ -98,7 +98,7 @@ LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "t
 
 def _user_prompt(text: str, language: str) -> str:
     language_name = LANGUAGE_NAMES.get(language, "한국어")
-    return f"고객 음성({language_name}): \"{text}\"\n{FORMAT_INSTRUCTION}"
+    return f"고객 음성({language_name}): \"{text}\"\n{_format_instruction()}"
 
 
 # LLM이 실패했을 때 쓰는 키워드 fallback.
@@ -130,18 +130,54 @@ MENU_CATALOG = {
 }
 
 
+MENU_FOREIGN_NAMES: dict[str, tuple[str, ...]] = {}
+MENU_SOURCE = "static"
+_menu_lock = threading.Lock()
+
+
 def _format_menu_catalog_instruction() -> str:
-    return "\n".join(f"- {menu_id}: {name}" for menu_id, name in MENU_CATALOG.items())
+    lines = []
+    for menu_id, name in MENU_CATALOG.items():
+        foreign = [n for n in MENU_FOREIGN_NAMES.get(menu_id, ()) if n and n != name]
+        suffix = f" ({' / '.join(dict.fromkeys(foreign))})" if foreign else ""
+        lines.append(f"- {menu_id}: {name}{suffix}")
+    return "\n".join(lines)
 
 
-# user prompt 뒤에 붙이는 JSON 형식 안내
-FORMAT_INSTRUCTION = f"""
+def _format_instruction() -> str:
+    example_id = next(iter(MENU_CATALOG), "burger_01")
+    return f"""
 반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
-[{{"menu_id": "burger_01", "quantity": 2, "options": ["소스 빼주세요"]}}]
+[{{"menu_id": "{example_id}", "quantity": 2, "options": ["소스 빼주세요"]}}]
 
 사용 가능한 menu_id 목록:
 {_format_menu_catalog_instruction()}
 """
+
+
+def apply_menu_catalog(
+    catalog: dict[str, str],
+    aliases: dict[str, tuple[str, ...]],
+    foreign_names: dict[str, tuple[str, ...]],
+    source: str,
+) -> None:
+    global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_SOURCE
+    if not catalog:
+        raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
+    with _menu_lock:
+        MENU_CATALOG = dict(catalog)
+        MENU_ALIASES = dict(aliases)
+        MENU_FOREIGN_NAMES = dict(foreign_names)
+        MENU_SOURCE = source
+    logger.info("[MENU] 메뉴 %d종 적용 (source=%s)", len(catalog), source)
+
+
+def menu_catalog_summary() -> dict:
+    return {
+        "source": MENU_SOURCE,
+        "count": len(MENU_CATALOG),
+        "menus": [{"menu_id": k, "name": v} for k, v in MENU_CATALOG.items()],
+    }
 
 MENU_ALIASES = {
     "burger_01": ("햄버거", "버거"),

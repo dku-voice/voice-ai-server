@@ -117,6 +117,11 @@ LLM_TIMEOUT_SECONDS = _get_float_env("LLM_TIMEOUT_SECONDS", 6.0, min_value=1.0)
 LLM_MAX_RETRIES = _get_int_env("LLM_MAX_RETRIES", 1)
 LLM_SKIP_KOREAN = _get_bool_env("LLM_SKIP_KOREAN", "true")
 
+MENU_SYNC_ENABLED = _get_bool_env("MENU_SYNC_ENABLED", "true")
+MENU_SYNC_URL = os.getenv("MENU_SYNC_URL", "http://backend:8080/api/ai/menus")
+MENU_SYNC_RETRY_SECONDS = _get_float_env("MENU_SYNC_RETRY_SECONDS", 10.0, min_value=1.0)
+MENU_SYNC_MAX_ATTEMPTS = _get_int_env("MENU_SYNC_MAX_ATTEMPTS", 30)
+
 
 # --- Vision / DeepFace 설정 ---
 VISION_MAX_IMAGE_BYTES = _get_int_env("VISION_MAX_IMAGE_BYTES", 5 * 1024 * 1024)
