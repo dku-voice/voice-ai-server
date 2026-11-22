@@ -24,13 +24,39 @@ def _clean(value) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+HANGUL_BASE = 0xAC00
+HANGUL_END = 0xD7A3
+JUNGSEONG_AE = 1
+JUNGSEONG_E = 5
+
+
+def _swap_vowel(text: str, source: int, target: int) -> str:
+    chars = []
+    for ch in text:
+        code = ord(ch)
+        if HANGUL_BASE <= code <= HANGUL_END:
+            offset = code - HANGUL_BASE
+            jung = (offset // 28) % 21
+            if jung == source:
+                code += (target - source) * 28
+        chars.append(chr(code))
+    return "".join(chars)
+
+
 def _korean_aliases(name_ko: str) -> tuple[str, ...]:
-    aliases = [name_ko]
+    bases = [name_ko]
     for prefix in BRAND_PREFIXES:
         if name_ko.startswith(prefix):
             stripped = name_ko[len(prefix):].strip()
             if len(stripped) >= 2:
-                aliases.append(stripped)
+                bases.append(stripped)
+    aliases = []
+    for base in bases:
+        aliases.extend((
+            base,
+            _swap_vowel(base, JUNGSEONG_E, JUNGSEONG_AE),
+            _swap_vowel(base, JUNGSEONG_AE, JUNGSEONG_E),
+        ))
     return tuple(dict.fromkeys(aliases))
 
 

@@ -5,6 +5,8 @@ from app.services import llm_service, menu_sync
 
 BACKEND_PAYLOAD = {
     "menus": [
+        {"menuId": 1, "nameKo": "데리버거", "nameEn": "Teri Burger", "status": "ACTIVE"},
+        {"menuId": 2, "nameKo": "리아 새우버거", "nameEn": "Ria Shrimp Burger", "status": "ACTIVE"},
         {"menuId": 3, "nameKo": "리아 불고기버거", "nameEn": "Ria Bulgogi Burger", "nameJa": "リア プルコギバーガー",
          "nameEs": "Hamburguesa Bulgogi Ria", "nameTh": "ริอา บูลโกกิเบอร์เกอร์", "status": "ACTIVE"},
         {"menuId": 4, "nameKo": "클래식 치즈버거", "nameEn": "Classic Cheeseburger", "nameJa": "クラシックチーズバーガー",
@@ -43,14 +45,14 @@ class MenuSyncTest(unittest.TestCase):
 
     def test_build_catalog_uses_numeric_ids_and_skips_invalid_menus(self):
         catalog, aliases, foreign = menu_sync.build_menu_catalog(BACKEND_PAYLOAD)
-        self.assertEqual(set(catalog), {"3", "4", "7", "14", "15"})
+        self.assertEqual(set(catalog), {"1", "2", "3", "4", "7", "14", "15"})
         self.assertIn("불고기버거", aliases["3"])
         self.assertIn("コーラ", foreign["14"])
 
     def test_sync_replaces_catalog_and_keyword_matching(self):
         summary = self._sync()
         self.assertEqual(summary["source"], "backend")
-        self.assertEqual(summary["count"], 5)
+        self.assertEqual(summary["count"], 7)
 
         def parsed(text):
             return {item.menu_id: item.quantity for item in llm_service._fallback_keyword_parse(text, log_result=False)}
@@ -61,6 +63,8 @@ class MenuSyncTest(unittest.TestCase):
         self.assertEqual(parsed("클래식 치즈버거 하나랑 콜라 하나"), {"4": 1, "14": 1})
         self.assertEqual(parsed("더블 클래식 치즈버거 주세요"), {"7": 1})
         self.assertEqual(parsed("コーラください"), {"14": 1})
+        self.assertEqual(parsed("콜라 2개랑 대리버거 하나 주세요"), {"14": 2, "1": 1})
+        self.assertEqual(parsed("세우버거 하나"), {"2": 1})
 
     def test_prompt_lists_backend_menus_with_foreign_names(self):
         self._sync()
@@ -86,7 +90,7 @@ class MenuSyncTest(unittest.TestCase):
     def test_backend_api_response_wrapper_is_unwrapped(self):
         wrapped = {"success": True, "data": BACKEND_PAYLOAD, "message": None}
         catalog, _, _ = menu_sync.build_menu_catalog(wrapped)
-        self.assertEqual(set(catalog), {"3", "4", "7", "14", "15"})
+        self.assertEqual(set(catalog), {"1", "2", "3", "4", "7", "14", "15"})
 
     def test_empty_menu_payload_is_rejected(self):
         with self.assertRaises(ValueError):
