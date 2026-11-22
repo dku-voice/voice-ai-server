@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 BRAND_PREFIXES = ("리아",)
 FOREIGN_NAME_FIELDS = ("nameEn", "nameJa", "nameEs", "nameTh")
+LANGUAGE_NAME_FIELDS = {"ko": "nameKo", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
 ORDERABLE_STATUSES = {"ACTIVE", "SOLD_OUT"}
 
 _stop_event = threading.Event()
@@ -99,9 +100,30 @@ def fetch_menu_payload(url: str = MENU_SYNC_URL, timeout: float = 5.0) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def build_names_by_language(payload: dict, catalog: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    result: dict[str, list[str]] = {lang: [] for lang in LANGUAGE_NAME_FIELDS}
+    for menu in payload.get("menus", []) if isinstance(payload, dict) else []:
+        if not isinstance(menu, dict) or str(menu.get("menuId")) not in catalog:
+            continue
+        for lang, field in LANGUAGE_NAME_FIELDS.items():
+            name = _clean(menu.get(field))
+            if name:
+                result[lang].append(name)
+    return {lang: tuple(dict.fromkeys(names)) for lang, names in result.items() if names}
+
+
 def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
-    catalog, aliases, foreign = build_menu_catalog(fetch_menu_payload(url))
-    llm_service.apply_menu_catalog(catalog, aliases, foreign, source="backend")
+    payload = fetch_menu_payload(url)
+    catalog, aliases, foreign = build_menu_catalog(payload)
+    llm_service.apply_menu_catalog(
+        catalog,
+        aliases,
+        foreign,
+        source="backend",
+        names_by_language=build_names_by_language(payload, catalog),
+    )
     return llm_service.menu_catalog_summary()
 
 

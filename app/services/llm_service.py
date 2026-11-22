@@ -131,6 +131,7 @@ MENU_CATALOG = {
 
 
 MENU_FOREIGN_NAMES: dict[str, tuple[str, ...]] = {}
+MENU_NAMES_BY_LANGUAGE: dict[str, tuple[str, ...]] = {}
 MENU_SOURCE = "static"
 _menu_lock = threading.Lock()
 
@@ -160,16 +161,27 @@ def apply_menu_catalog(
     aliases: dict[str, tuple[str, ...]],
     foreign_names: dict[str, tuple[str, ...]],
     source: str,
+    names_by_language: dict[str, tuple[str, ...]] | None = None,
 ) -> None:
-    global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_SOURCE
+    global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_NAMES_BY_LANGUAGE, MENU_SOURCE
     if not catalog:
         raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
     with _menu_lock:
         MENU_CATALOG = dict(catalog)
         MENU_ALIASES = dict(aliases)
         MENU_FOREIGN_NAMES = dict(foreign_names)
+        MENU_NAMES_BY_LANGUAGE = dict(names_by_language or {})
         MENU_SOURCE = source
     logger.info("[MENU] 메뉴 %d종 적용 (source=%s)", len(catalog), source)
+
+
+def menu_names_for_language(language: str) -> tuple[str, ...]:
+    names = MENU_NAMES_BY_LANGUAGE.get(language)
+    if names:
+        return names
+    if language == "ko":
+        return tuple(MENU_CATALOG.values())
+    return ()
 
 
 def menu_catalog_summary() -> dict:

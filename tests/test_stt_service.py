@@ -24,7 +24,7 @@ class STTServiceTest(unittest.TestCase):
         lock = RecordingLock()
 
         class DummyModel:
-            def transcribe(self, audio_data, language, beam_size):
+            def transcribe(self, audio_data, language, beam_size, hotwords=None):
                 def segments():
                     if not lock.locked:
                         raise AssertionError("STT inference lock was not held")
@@ -75,7 +75,7 @@ class LanguagePickTest(unittest.TestCase):
         calls = []
 
         class DummyModel:
-            def transcribe(self, audio_data, language, beam_size):
+            def transcribe(self, audio_data, language, beam_size, hotwords=None):
                 calls.append(language)
                 if language is None:
                     info = SimpleNamespace(
@@ -95,6 +95,27 @@ class LanguagePickTest(unittest.TestCase):
 
         self.assertEqual(calls, [None, "es"])
         self.assertEqual(result, ("una coca cola", "es"))
+
+    def test_detected_language_uses_menu_hotwords(self):
+        old_model = stt_service._whisper_model
+        calls = []
+
+        class DummyModel:
+            def transcribe(self, audio_data, language, beam_size, hotwords=None):
+                calls.append((language, hotwords))
+                info = SimpleNamespace(language="ko", language_probability=0.97, all_language_probs=None)
+                return iter([SimpleNamespace(text="콜라 세 개")]), info
+
+        stt_service._whisper_model = DummyModel()
+        try:
+            result = stt_service._transcribe_sync(np.zeros(1600, dtype=np.float32))
+        finally:
+            stt_service._whisper_model = old_model
+
+        self.assertEqual(result, ("콜라 세 개", "ko"))
+        self.assertEqual(calls[0], (None, None))
+        self.assertEqual(calls[1][0], "ko")
+        self.assertIn("콜라", calls[1][1])
 
 
 if __name__ == "__main__":

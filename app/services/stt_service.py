@@ -10,6 +10,7 @@ import numpy as np
 import logging
 import io
 import threading
+from types import SimpleNamespace
 import soundfile as sf
 from faster_whisper import WhisperModel
 
@@ -112,6 +113,17 @@ def _pick_language(info) -> str:
     return detected
 
 
+def _hotwords_for(language: str | None) -> str | None:
+    if not language:
+        return None
+    from app.services.llm_service import menu_names_for_language
+
+    names = menu_names_for_language(language)
+    if not names:
+        return None
+    return ", ".join(names)[:400]
+
+
 def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
     """
     실제 faster-whisper 호출.
@@ -127,21 +139,28 @@ def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
             audio_data,
             language=STT_LANGUAGE,
             beam_size=5,
+            hotwords=_hotwords_for(STT_LANGUAGE) if STT_LANGUAGE else None,
         )
 
         language = STT_LANGUAGE or _pick_language(info)
-        if language != info.language:
-            logger.info(
-                "[STT] 감지 언어 %s(prob=%.2f) 대신 %s로 다시 인식",
-                info.language,
-                info.language_probability,
-                language,
-            )
+        hotwords = _hotwords_for(language)
+        if not STT_LANGUAGE and (language != info.language or hotwords):
+            if language != info.language:
+                logger.info(
+                    "[STT] 감지 언어 %s(prob=%.2f) 대신 %s로 다시 인식",
+                    info.language,
+                    info.language_probability,
+                    language,
+                )
+            detected_probability = info.language_probability
             segments, info = model.transcribe(
                 audio_data,
                 language=language,
                 beam_size=5,
+                hotwords=hotwords,
             )
+            if language == info.language:
+                info = SimpleNamespace(language=language, language_probability=detected_probability)
 
         text_parts = []
         for seg in segments:
