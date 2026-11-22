@@ -35,6 +35,8 @@ def _korean_aliases(name_ko: str) -> tuple[str, ...]:
 
 
 def build_menu_catalog(payload: dict) -> tuple[dict, dict, dict]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
     menus = payload.get("menus") if isinstance(payload, dict) else None
     if not isinstance(menus, list):
         raise ValueError("메뉴 응답에 menus 배열이 없습니다.")

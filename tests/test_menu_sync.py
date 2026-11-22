@@ -83,6 +83,11 @@ class MenuSyncTest(unittest.TestCase):
                 menu_sync.sync_menus_once()
         self.assertIs(llm_service.MENU_CATALOG, before)
 
+    def test_backend_api_response_wrapper_is_unwrapped(self):
+        wrapped = {"success": True, "data": BACKEND_PAYLOAD, "message": None}
+        catalog, _, _ = menu_sync.build_menu_catalog(wrapped)
+        self.assertEqual(set(catalog), {"3", "4", "7", "14", "15"})
+
     def test_empty_menu_payload_is_rejected(self):
         with self.assertRaises(ValueError):
             menu_sync.build_menu_catalog({"menus": []})

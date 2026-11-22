@@ -17,6 +17,7 @@ async def get_menus():
 
 
 @router.post("/resync")
+@router.post("/reload")
 async def resync_menus():
     try:
         return await run_in_threadpool(sync_menus_once)
