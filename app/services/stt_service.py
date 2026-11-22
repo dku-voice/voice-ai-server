@@ -22,6 +22,7 @@ from app.config import (
     SUPPORTED_LANGUAGES,
     DEFAULT_LANGUAGE,
     LANGUAGE_MIN_PROBABILITY,
+    STT_HOTWORD_LANGUAGES,
 )
 from app.services.threadpool import run_model_task
 
@@ -114,7 +115,7 @@ def _pick_language(info) -> str:
 
 
 def _hotwords_for(language: str | None) -> str | None:
-    if not language:
+    if not language or language not in STT_HOTWORD_LANGUAGES:
         return None
     from app.services.llm_service import menu_names_for_language
 

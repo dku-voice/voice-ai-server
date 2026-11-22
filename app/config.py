@@ -78,6 +78,9 @@ STT_LANGUAGE = os.getenv("STT_LANGUAGE") or None
 SUPPORTED_LANGUAGES = ("ko", "ja", "es", "th")
 DEFAULT_LANGUAGE = "ko"
 LANGUAGE_MIN_PROBABILITY = _get_float_env("LANGUAGE_MIN_PROBABILITY", 0.5)
+STT_HOTWORD_LANGUAGES = tuple(
+    lang.strip() for lang in os.getenv("STT_HOTWORD_LANGUAGES", "ko").split(",") if lang.strip()
+)
 
 
 # --- VAD 설정 ---

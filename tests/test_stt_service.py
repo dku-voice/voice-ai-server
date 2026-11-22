@@ -117,6 +117,10 @@ class LanguagePickTest(unittest.TestCase):
         self.assertEqual(calls[1][0], "ko")
         self.assertIn("콜라", calls[1][1])
 
+    def test_hotwords_are_not_used_for_foreign_languages(self):
+        self.assertIsNone(stt_service._hotwords_for("ja"))
+        self.assertIn("콜라", stt_service._hotwords_for("ko"))
+
 
 if __name__ == "__main__":
     unittest.main()

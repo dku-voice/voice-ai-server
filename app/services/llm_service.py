@@ -254,7 +254,7 @@ NUMBER_MAP = {
     "열개": 10, "열": 10, "십": 10, "10": 10,
 }
 
-QUANTITY_UNITS = ("개", "잔", "캔", "인분", "조각", "마리", "세트")
+QUANTITY_UNITS = ("개", "계", "게", "잔", "캔", "인분", "조각", "마리", "세트")
 QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만")
 AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
 NUMBER_PATTERN = r"\d+|" + "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))

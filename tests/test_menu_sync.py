@@ -65,6 +65,7 @@ class MenuSyncTest(unittest.TestCase):
         self.assertEqual(parsed("コーラください"), {"14": 1})
         self.assertEqual(parsed("콜라 2개랑 대리버거 하나 주세요"), {"14": 2, "1": 1})
         self.assertEqual(parsed("세우버거 하나"), {"2": 1})
+        self.assertEqual(parsed("콜라 세계랑 데리버거 한계 주세요"), {"14": 3, "1": 1})
 
     def test_prompt_lists_backend_menus_with_foreign_names(self):
         self._sync()
