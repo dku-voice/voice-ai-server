@@ -155,11 +155,15 @@ OPTION_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("토마토 제거", ("토마토",), "remove"),
     ("양파 제거", ("양파",), "remove"),
     ("소스 적게", ("소스",), "less"),
+    ("치즈 소스", ("치즈소스",), "mention"),
+    ("칠리 소스", ("칠리소스",), "mention"),
+    ("어니언 소스", ("어니언소스",), "mention"),
 )
 OPTION_TRIGGERS = {
     "add": ("추가", "넣어", "올려", "얹어", "더", "많이", "플러스"),
     "remove": ("제거", "빼", "없이", "말고", "삭제", "안넣", "넣지말"),
     "less": ("적게", "조금", "덜", "약간", "살짝"),
+    "mention": ("",),
 }
 OPTION_FILLERS = ("", "를", "을", "은", "는", "도", "만", "좀", "하나", "한장", "한개", "1장", "1개", "두장", "2장")
 OPTION_NAMES = tuple(dict.fromkeys(rule[0] for rule in OPTION_RULES))

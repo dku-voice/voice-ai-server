@@ -78,6 +78,9 @@ class MenuOptionTest(unittest.TestCase):
         item = llm_service._coerce_order_item({"menu_id": "1", "quantity": 1, "options": ["양파 빼주세요", "치즈추가", "unknown"]})
         self.assertEqual(item.options, ["양파 제거", "치즈 추가"])
 
+    def test_sauce_options_are_detected_by_name(self):
+        self.assertEqual(self.parse("치즈스틱 칠리 소스로 주세요"), [("20", 1, ["칠리 소스"])])
+
     def test_korean_hotwords_include_options(self):
         names = llm_service.menu_names_for_language("ko")
         self.assertIn("치즈 추가", names)
