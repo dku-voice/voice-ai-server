@@ -91,7 +91,7 @@ SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보
 3. 텍스트에서 우리 매장 메뉴에 있는 항목을 전혀 식별할 수 없는 경우, 반드시 빈 배열 []을 반환하십시오. 메뉴에 없는 항목을 절대 지어내지 마십시오(환각/Hallucination 방지).
 
 【다국어 주문 규칙】:
-고객은 한국어, 일본어, 스페인어, 태국어 중 하나로 주문할 수 있습니다. 어떤 언어로 말하든 메뉴명을 아래 한국어 메뉴 목록의 menu_id로 매칭하십시오. 수량도 해당 언어의 수 표현(예: ひとつ, dos, สอง)을 숫자로 변환하십시오."""
+고객은 한국어, 일본어, 스페인어, 태국어 중 하나로 주문할 수 있습니다. 어떤 언어로 말하든 메뉴명을 아래 한국어 메뉴 목록의 menu_id로 매칭하십시오. 수량도 해당 언어의 수 표현(예: ひとつ, dos, สอง)을 숫자로 변환하십시오. 수량을 말하지 않고 메뉴 이름만 말한 경우 quantity는 반드시 1입니다."""
 
 LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
 
@@ -217,7 +217,7 @@ def _format_instruction() -> str:
     example_id = next(iter(MENU_CATALOG), "burger_01")
     return f"""
 반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
-[{{"menu_id": "{example_id}", "quantity": 2, "options": ["치즈 추가"]}}]
+[{{"menu_id": "{example_id}", "quantity": 1, "options": ["치즈 추가"]}}]
 
 사용 가능한 menu_id 목록:
 {_format_menu_catalog_instruction()}
