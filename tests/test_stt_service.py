@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import unittest
 from types import SimpleNamespace
 
@@ -116,6 +117,11 @@ class LanguagePickTest(unittest.TestCase):
         self.assertEqual(calls[0], (None, None))
         self.assertEqual(calls[1][0], "ko")
         self.assertIn("콜라", calls[1][1])
+
+    def test_korean_hotwords_drop_brand_prefix(self):
+        with patch("app.services.llm_service.menu_names_for_language", return_value=("데리버거", "리아 불고기버거", "리아 새우버거")):
+            hotwords = stt_service._hotwords_for("ko")
+        self.assertEqual(hotwords, "데리버거, 불고기버거, 새우버거")
 
     def test_hotwords_are_not_used_for_foreign_languages(self):
         self.assertIsNone(stt_service._hotwords_for("ja"))

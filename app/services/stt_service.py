@@ -114,6 +114,18 @@ def _pick_language(info) -> str:
     return detected
 
 
+HOTWORD_BRAND_PREFIXES = ("리아",)
+
+
+def _strip_brand(name: str) -> str:
+    for prefix in HOTWORD_BRAND_PREFIXES:
+        if name.startswith(prefix):
+            stripped = name[len(prefix):].strip()
+            if len(stripped) >= 2:
+                return stripped
+    return name
+
+
 def _hotwords_for(language: str | None) -> str | None:
     if not language or language not in STT_HOTWORD_LANGUAGES:
         return None
@@ -122,6 +134,8 @@ def _hotwords_for(language: str | None) -> str | None:
     names = menu_names_for_language(language)
     if not names:
         return None
+    if language == "ko":
+        names = tuple(dict.fromkeys(_strip_brand(name) for name in names))
     return ", ".join(names)[:400]
 
 

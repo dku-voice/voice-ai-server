@@ -16,6 +16,7 @@ from app.services.menu_sync import start_menu_sync, stop_menu_sync
 from app.api.vision import router as vision_router
 from app.api.websockets import router as ws_router
 from app.config import VISION_WARMUP_ON_STARTUP
+from app.services.vad_service import _load_vad_model
 from app.services.stt_service import get_model_status as get_stt_model_status
 from app.services.stt_service import load_model as load_stt_model
 from app.services.threadpool import run_model_task
@@ -50,8 +51,12 @@ async def lifespan(app: FastAPI):
         app.state.stt_error = str(e)
         logger.error("[Startup] STT 모델 로딩 실패. 서버는 degraded 상태로 계속 실행됩니다: %s", e, exc_info=True)
 
-    # VAD 모델은 첫 호출 때 로딩한다.
-    logger.info("[Startup] VAD 모델은 첫 요청 시 로딩됨 (lazy)")
+    logger.info("[Startup] VAD 모델 로딩 중...")
+    try:
+        await run_model_task(_load_vad_model)
+        logger.info("[Startup] VAD 모델 로딩 완료")
+    except Exception as e:
+        logger.warning("[Startup] VAD 모델 미리 로딩 실패, 첫 요청 때 다시 시도합니다: %s", e)
 
     if VISION_WARMUP_ON_STARTUP:
         logger.info("[Startup] DeepFace 연령 추정 모델 워밍업 중...")
