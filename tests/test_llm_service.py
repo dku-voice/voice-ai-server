@@ -21,7 +21,7 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].menu_id, "burger_01")
         self.assertEqual(items[0].quantity, 2)
-        self.assertEqual(items[0].options, ["양파 빼주세요"])
+        self.assertEqual(items[0].options, ["양파 제거"])
 
     def test_reject_unknown_menu_id(self):
         raw = '[{"menu_id": "unknown_01", "quantity": 1, "options": []}]'

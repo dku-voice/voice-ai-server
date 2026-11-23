@@ -131,6 +131,7 @@ MENU_CATALOG = {
 
 
 MENU_FOREIGN_NAMES: dict[str, tuple[str, ...]] = {}
+MENU_OPTIONS_BY_ID: dict[str, tuple[str, ...]] = {}
 MENU_NAMES_BY_LANGUAGE: dict[str, tuple[str, ...]] = {}
 MENU_SOURCE = "static"
 _menu_lock = threading.Lock()
@@ -145,14 +146,84 @@ def _format_menu_catalog_instruction() -> str:
     return "\n".join(lines)
 
 
+OPTION_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("비프패티 추가", ("비프패티", "소고기패티", "고기패티", "패티"), "add"),
+    ("반숙계란 추가", ("반숙계란", "반숙달걀", "반숙", "계란", "달걀", "에그"), "add"),
+    ("베이컨 추가", ("베이컨",), "add"),
+    ("치즈 추가", ("치즈",), "add"),
+    ("토마토 추가", ("토마토",), "add"),
+    ("토마토 제거", ("토마토",), "remove"),
+    ("양파 제거", ("양파",), "remove"),
+    ("소스 적게", ("소스",), "less"),
+)
+OPTION_TRIGGERS = {
+    "add": ("추가", "넣어", "올려", "얹어", "더", "많이", "플러스"),
+    "remove": ("제거", "빼", "없이", "말고", "삭제", "안넣", "넣지말"),
+    "less": ("적게", "조금", "덜", "약간", "살짝"),
+}
+OPTION_FILLERS = ("", "를", "을", "은", "는", "도", "만", "좀", "하나", "한장", "한개", "1장", "1개", "두장", "2장")
+OPTION_NAMES = tuple(dict.fromkeys(rule[0] for rule in OPTION_RULES))
+
+
+def _option_pattern(ingredients: tuple[str, ...], kind: str) -> re.Pattern:
+    words = "|".join(re.escape(w) for w in sorted(ingredients, key=len, reverse=True))
+    fillers = "|".join(re.escape(f) for f in sorted(OPTION_FILLERS, key=len, reverse=True) if f)
+    triggers = "|".join(re.escape(t) for t in OPTION_TRIGGERS[kind])
+    return re.compile(rf"(?:{words})(?:{fillers})*(?:{triggers})")
+
+
+OPTION_PATTERNS = tuple((name, _option_pattern(words, kind)) for name, words, kind in OPTION_RULES)
+
+
+def _find_option_matches(normalized_text: str) -> list[tuple[int, int, str]]:
+    candidates = []
+    for name, pattern in OPTION_PATTERNS:
+        for match in pattern.finditer(normalized_text):
+            candidates.append((match.start(), match.end(), name))
+    candidates.sort(key=lambda c: (c[0], -(c[1] - c[0])))
+    matches: list[tuple[int, int, str]] = []
+    for candidate in candidates:
+        if any(candidate[0] < end and start < candidate[1] for start, end, _ in matches):
+            continue
+        matches.append(candidate)
+    return matches
+
+
+def canonical_options(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        normalized = _normalize_order_text(value)
+        exact = next((n for n in OPTION_NAMES if _normalize_order_text(n) == normalized), None)
+        names = [exact] if exact else [name for _, _, name in _find_option_matches(normalized)]
+        for name in names:
+            if name not in result:
+                result.append(name)
+    return result
+
+
+def _option_allowed(menu_id: str, option_name: str) -> bool:
+    allowed = MENU_OPTIONS_BY_ID.get(menu_id)
+    if allowed is None:
+        return True
+    target = _normalize_order_text(option_name)
+    return any(_normalize_order_text(name) == target for name in allowed)
+
+
+def _filter_options(menu_id: str, options: list[str]) -> list[str]:
+    return [name for name in options if _option_allowed(menu_id, name)]
+
+
 def _format_instruction() -> str:
     example_id = next(iter(MENU_CATALOG), "burger_01")
     return f"""
 반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
-[{{"menu_id": "{example_id}", "quantity": 2, "options": ["소스 빼주세요"]}}]
+[{{"menu_id": "{example_id}", "quantity": 2, "options": ["치즈 추가"]}}]
 
 사용 가능한 menu_id 목록:
 {_format_menu_catalog_instruction()}
+
+options에는 아래 이름만 그대로 넣고, 요청이 없으면 빈 배열로 두세요.
+{", ".join(OPTION_NAMES)}
 """
 
 
@@ -162,8 +233,9 @@ def apply_menu_catalog(
     foreign_names: dict[str, tuple[str, ...]],
     source: str,
     names_by_language: dict[str, tuple[str, ...]] | None = None,
+    options_by_id: dict[str, tuple[str, ...]] | None = None,
 ) -> None:
-    global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_NAMES_BY_LANGUAGE, MENU_SOURCE
+    global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_NAMES_BY_LANGUAGE, MENU_SOURCE, MENU_OPTIONS_BY_ID
     if not catalog:
         raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
     with _menu_lock:
@@ -171,17 +243,18 @@ def apply_menu_catalog(
         MENU_ALIASES = dict(aliases)
         MENU_FOREIGN_NAMES = dict(foreign_names)
         MENU_NAMES_BY_LANGUAGE = dict(names_by_language or {})
+        MENU_OPTIONS_BY_ID = dict(options_by_id or {})
         MENU_SOURCE = source
     logger.info("[MENU] 메뉴 %d종 적용 (source=%s)", len(catalog), source)
 
 
 def menu_names_for_language(language: str) -> tuple[str, ...]:
     names = MENU_NAMES_BY_LANGUAGE.get(language)
-    if names:
-        return names
-    if language == "ko":
-        return tuple(MENU_CATALOG.values())
-    return ()
+    if not names and language == "ko":
+        names = tuple(MENU_CATALOG.values())
+    if language == "ko" and names:
+        return tuple(dict.fromkeys(tuple(names) + OPTION_NAMES))
+    return names or ()
 
 
 def menu_catalog_summary() -> dict:
@@ -412,9 +485,22 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True) -> List[Order
     normalized_text = _normalize_order_text(text)
     items: List[OrderItem] = []
 
-    for start_idx, end_idx, menu_id in _find_menu_matches(normalized_text):
+    menu_matches = _find_menu_matches(normalized_text)
+    option_matches = [
+        option for option in _find_option_matches(normalized_text)
+        if not any(option[0] < end and start < option[1] for start, end, _ in menu_matches)
+    ]
+    options_per_menu: list[list[str]] = [[] for _ in menu_matches]
+    for option_start, _, option_name in option_matches:
+        preceding = [i for i, match in enumerate(menu_matches) if match[1] <= option_start]
+        following = [i for i, match in enumerate(menu_matches) if match[0] >= option_start]
+        target = preceding[-1] if preceding else (following[0] if following else None)
+        if target is not None and option_name not in options_per_menu[target]:
+            options_per_menu[target].append(option_name)
+
+    for (start_idx, end_idx, menu_id), options in zip(menu_matches, options_per_menu):
         quantity = _find_quantity_near_menu(normalized_text, start_idx, end_idx)
-        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=[]))
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
 
     items = _merge_duplicate_items(items)
     if log_result:
@@ -500,7 +586,7 @@ def _coerce_order_item(entry: Any) -> OrderItem:
     return OrderItem(
         menu_id=menu_id,
         quantity=_normalize_quantity(entry.get("quantity", 1)),
-        options=_normalize_options(entry.get("options", [])),
+        options=_filter_options(menu_id, canonical_options(_normalize_options(entry.get("options", [])))),
     )
 
 

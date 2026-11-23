@@ -114,6 +114,25 @@ def build_names_by_language(payload: dict, catalog: dict[str, str]) -> dict[str,
     return {lang: tuple(dict.fromkeys(names)) for lang, names in result.items() if names}
 
 
+def build_options_by_id(payload: dict, catalog: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    result: dict[str, tuple[str, ...]] = {}
+    for menu in payload.get("menus", []) if isinstance(payload, dict) else []:
+        if not isinstance(menu, dict) or str(menu.get("menuId")) not in catalog:
+            continue
+        options = menu.get("options")
+        if not isinstance(options, list):
+            continue
+        names = []
+        for option in options:
+            name = _clean(option.get("nameKo")) if isinstance(option, dict) else _clean(option)
+            if name:
+                names.append(name)
+        result[str(menu["menuId"])] = tuple(dict.fromkeys(names))
+    return result
+
+
 def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
     payload = fetch_menu_payload(url)
     catalog, aliases, foreign = build_menu_catalog(payload)
@@ -123,6 +142,7 @@ def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
         foreign,
         source="backend",
         names_by_language=build_names_by_language(payload, catalog),
+        options_by_id=build_options_by_id(payload, catalog),
     )
     return llm_service.menu_catalog_summary()
 
