@@ -31,7 +31,8 @@ COPY app ./app
 COPY main.py .
 
 RUN adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /home/appuser/.deepface/weights /home/appuser/.cache/huggingface \
+    && chown -R appuser:appuser /app /home/appuser/.deepface /home/appuser/.cache
 USER appuser
 
 EXPOSE 8000
