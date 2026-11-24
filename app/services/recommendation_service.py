@@ -9,16 +9,18 @@ app/services/recommendation_service.py - 메뉴 추천 RAG 파이프라인
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 from app.config import LLM_MODEL
 from app.schemas import MenuRecommendationItem
+# MENU_CATALOG 등은 백엔드 동기화 때 llm_service 쪽에서 통째로 교체된다.
+# 이름만 import하면 옛 객체를 계속 보게 되므로, 모듈을 통해 호출 시점에 읽는다.
+from app.services import llm_service
 from app.services.llm_service import (
     LLMConfigurationError,
     LLMResponseValidationError,
-    MENU_ALIASES,
-    MENU_CATALOG,
     completion_options,
     get_llm_client,
 )
@@ -85,8 +87,17 @@ RECOMMENDATION_INTENT_TERMS = (
 )
 
 RECOMMENDATION_SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk의 메뉴 추천 마이크로서비스입니다.
+고객 요청은 한국어, 일본어, 스페인어, 태국어 중 하나일 수 있습니다.
 반드시 제공된 메뉴 문서에 있는 menu_id만 추천하세요.
 메뉴 문서에 없는 가격, 알레르기, 매운맛, 재고 정보는 지어내지 마세요.
+요청은 아래 기준으로 해석하세요.
+- 기름진/느끼한 요청은 문서의 지방 수치가 높은 메뉴를, 담백한/가벼운 요청은 지방과 칼로리 수치가 낮은 메뉴를 우선 추천하세요.
+- 짭짤한 요청은 나트륨이 높은 메뉴를, 단백질이 높은 요청은 단백질 수치가 높은 메뉴를 우선 추천하세요.
+- 매콤한 요청이나 치즈, 채소 같은 맛/재료 요청은 문서의 설명에 해당 표현이 있는 메뉴를 우선 추천하세요.
+- 설명 끝의 "특징:" 항목은 메뉴의 특성입니다. 고객 요청과 뜻이 맞는 특징이 있는 메뉴를 우선 추천하세요.
+  (들고 다니며 먹기 좋은 거→간편함, 아이가 먹기 좋은 거→아이 추천, 처음 왔는데 뭐가 맛있어요→대표 메뉴)
+- 싼/저렴한/가성비 요청은 문서의 price가 낮은 메뉴를 우선 추천하세요.
+- 문서에 근거가 없으면 추천하지 마세요.
 응답은 JSON 객체 하나로만 출력하세요."""
 
 RECOMMENDATION_FORMAT_INSTRUCTION = """
@@ -111,8 +122,8 @@ def _create_document(page_content: str, metadata: dict[str, Any]) -> MenuDocumen
 
 def _profile_to_document(profile: dict[str, Any]) -> MenuDocument:
     menu_id = profile["menu_id"]
-    name = MENU_CATALOG[menu_id]
-    aliases = MENU_ALIASES.get(menu_id, ())
+    name = llm_service.MENU_CATALOG[menu_id]
+    aliases = llm_service.MENU_ALIASES.get(menu_id, ())
     search_terms = tuple(dict.fromkeys((name, *aliases, profile["category"], *profile["tags"])))
 
     page_content = "\n".join(
@@ -136,12 +147,78 @@ def _profile_to_document(profile: dict[str, Any]) -> MenuDocument:
     )
 
 
+# 영양 정보 표시 단위 (백엔드 마이그레이션 기준: 칼로리 kcal, 탄수화물/지방/단백질 g, 나트륨 mg)
+NUTRITION_UNITS = {"칼로리": "kcal", "탄수화물": "g", "지방": "g", "단백질": "g", "나트륨": "mg"}
+
+
+def _format_number(value: Any) -> str:
+    return f"{value:g}" if isinstance(value, (int, float)) else str(value)
+
+
+def _format_nutrition(nutrition: dict[str, Any]) -> str:
+    return ", ".join(
+        f"{label} {_format_number(value)}{NUTRITION_UNITS.get(label, '')}"
+        for label, value in nutrition.items()
+    )
+
+
+def _live_document(menu_id: str, name: str) -> MenuDocument:
+    """백엔드에서 동기화된 메뉴 하나를 추천 문서로 만든다."""
+    meta = llm_service.MENU_META_BY_ID.get(menu_id, {})
+    aliases = llm_service.MENU_ALIASES.get(menu_id, ())
+    foreign_names = llm_service.MENU_FOREIGN_NAMES.get(menu_id, ())
+    category = meta.get("category", "")
+    description = meta.get("description", "")
+    allergens = tuple(meta.get("allergens", ()))
+    nutrition = meta.get("nutrition", {})
+    price = meta.get("price")
+
+    # 외국어 이름도 검색어에 넣어서 일본어/스페인어/태국어 질문이 메뉴 이름으로 매칭되게 한다.
+    search_terms = tuple(dict.fromkeys(term for term in (name, *aliases, *foreign_names, category) if term))
+
+    lines = [f"menu_id: {menu_id}", f"name: {name}"]
+    other_names = [n for n in dict.fromkeys(foreign_names) if n and n != name]
+    if other_names:
+        lines.append(f"other_names: {' / '.join(other_names)}")
+    if category:
+        lines.append(f"category: {category}")
+    if description:
+        lines.append(f"description: {description}")
+    if allergens:
+        lines.append(f"allergens: {', '.join(allergens)}")
+    if nutrition:
+        lines.append(f"nutrition: {_format_nutrition(nutrition)}")
+    if price is not None:
+        lines.append(f"price: {price:,}원")
+
+    # 본문 토큰 점수는 이 텍스트로만 계산한다. 'nutrition', '단백질' 같은 항목 이름 때문에
+    # 모든 문서가 똑같이 점수를 얻는 것을 막기 위해서다.
+    match_text = " ".join(part for part in (name, *aliases, *foreign_names, category, description, *allergens) if part)
+    return _create_document(
+        page_content="\n".join(lines),
+        metadata={
+            "menu_id": menu_id,
+            "name": name,
+            "category": category,
+            "tags": [],
+            "search_terms": list(search_terms),
+            "match_text": match_text,
+        },
+    )
+
+
 def build_menu_documents() -> list[MenuDocument]:
-    """현재 서버에 있는 메뉴 목록을 RAG 검색용 문서로 만든다."""
-    return [_profile_to_document(profile) for profile in MENU_RECOMMENDATION_PROFILES]
-
-
-_MENU_DOCUMENTS = build_menu_documents()
+    """
+    현재 서버가 알고 있는 메뉴 목록을 RAG 검색용 문서로 만든다.
+    백엔드 동기화 전(static)에는 기존 고정 프로필을, 동기화 후에는 실제 메뉴를 쓴다.
+    """
+    if llm_service.MENU_SOURCE == "static":
+        return [
+            _profile_to_document(profile)
+            for profile in MENU_RECOMMENDATION_PROFILES
+            if profile["menu_id"] in llm_service.MENU_CATALOG
+        ]
+    return [_live_document(menu_id, name) for menu_id, name in llm_service.MENU_CATALOG.items()]
 
 
 def _embedding_source(document: MenuDocument) -> str:
@@ -149,15 +226,51 @@ def _embedding_source(document: MenuDocument) -> str:
     return " ".join(document.metadata["search_terms"])
 
 
-_MENU_EMBEDDING_INDEX = MenuEmbeddingIndex(
-    [(document.metadata["menu_id"], _embedding_source(document)) for document in _MENU_DOCUMENTS]
-)
+_MENU_DOCUMENTS: list[MenuDocument] = []
+_MENU_EMBEDDING_INDEX: MenuEmbeddingIndex | None = None
+_menu_state: tuple[list[MenuDocument], MenuEmbeddingIndex, tuple] | None = None
+_menu_state_lock = threading.Lock()
+
+
+def _menu_state_key() -> tuple:
+    return (llm_service.MENU_SOURCE, llm_service.MENU_VERSION)
+
+
+def _get_menu_state() -> tuple[list[MenuDocument], MenuEmbeddingIndex]:
+    """
+    (문서 목록, 임베딩 인덱스)를 돌려준다.
+    메뉴가 동기화돼서 버전이 바뀌었을 때만 다시 만든다.
+    """
+    global _MENU_DOCUMENTS, _MENU_EMBEDDING_INDEX, _menu_state
+
+    state = _menu_state
+    if state is not None and state[2] == _menu_state_key():
+        return state[0], state[1]
+
+    with _menu_state_lock:
+        key = _menu_state_key()
+        state = _menu_state
+        if state is None or state[2] != key:
+            documents = build_menu_documents()
+            index = MenuEmbeddingIndex(
+                [(document.metadata["menu_id"], _embedding_source(document)) for document in documents]
+            )
+            state = (documents, index, key)
+            _menu_state = state
+            _MENU_DOCUMENTS = documents
+            _MENU_EMBEDDING_INDEX = index
+            logger.info("[RAG] 추천 문서 %d건 생성 (source=%s, version=%s)", len(documents), key[0], key[1])
+    return state[0], state[1]
+
+
+_get_menu_state()
 
 
 def _score_document(
     query: str,
     query_vector: dict[int, float],
     document: MenuDocument,
+    index: MenuEmbeddingIndex | None = None,
 ) -> int:
     normalized_query = _normalize_text(query)
     if not normalized_query:
@@ -169,12 +282,15 @@ def _score_document(
         if normalized_term and normalized_term in normalized_query:
             score += 10 + len(normalized_term)
 
-    content = _normalize_text(document.page_content)
+    # 동기화된 실제 메뉴(match_text 있음)는 이름/카테고리/설명에 들어 있는 단어가 더 믿을 만한 신호라 가중치를 높인다.
+    match_text = document.metadata.get("match_text")
+    token_weight = 3 if match_text else 1
+    content = _normalize_text(match_text or document.page_content)
     for token in re.findall(r"[0-9A-Za-z가-힣]+", query.lower()):
         if len(token) >= 2 and token in content:
-            score += 1
+            score += token_weight
 
-    similarity = _MENU_EMBEDDING_INDEX.similarity(query_vector, document.metadata["menu_id"])
+    similarity = (index or _MENU_EMBEDDING_INDEX).similarity(query_vector, document.metadata["menu_id"])
     score += embedding_boost(similarity)
 
     return score
@@ -185,26 +301,51 @@ def _looks_like_recommendation_query(query: str) -> bool:
     return any(term in normalized_query for term in RECOMMENDATION_INTENT_TERMS)
 
 
+def _contains_hangul(text: str) -> bool:
+    return re.search(r"[가-힣]", text) is not None
+
+
+# 메뉴가 이 개수 이하이면 점수와 상관없이 후보를 전부 LLM에 넘긴다.
+# (점수순 상위 몇 개만 넘기면 "추천해줘"처럼 점수가 같은 질문에서 앞쪽 메뉴만 보게 된다.)
+FULL_POOL_LIMIT = 20
+# 메뉴가 더 많아지면 점수순 상위 이 개수만 넘긴다.
+CANDIDATE_POOL_SIZE = 8
+
+
+def _pool_limit(total: int, top_k: int) -> int:
+    if total <= FULL_POOL_LIMIT:
+        return total
+    return max(top_k, CANDIDATE_POOL_SIZE)
+
+
 def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
     """
     메뉴 문서 검색.
     제5주차 RAG 검색 최적화: 키워드 매치 + 본문 토큰 + 메뉴 메타데이터 기반
     해시 TF-IDF 코사인 유사도를 합쳐서 후보 순서를 만든다.
+
+    LLM에 넘길 후보 풀을 돌려주므로 top_k보다 많을 수 있다.
+    최종 top_k 개수 제한은 LLM 응답을 파싱할 때 적용한다.
     """
     query = query.strip()
     if not query:
         return []
 
-    documents = _MENU_DOCUMENTS
-    query_vector = _MENU_EMBEDDING_INDEX.query_vector(query)
+    documents, embedding_index = _get_menu_state()
+    query_vector = embedding_index.query_vector(query)
     scored = [
-        (_score_document(query, query_vector, document), index, document)
+        (_score_document(query, query_vector, document, embedding_index), index, document)
         for index, document in enumerate(documents)
     ]
     matched = [item for item in scored if item[0] > 0]
 
-    # "추천해줘"처럼 조건이 아직 넓은 문장은 기본 메뉴 문서를 안정적인 순서로 넘긴다.
-    if matched:
+    # 한글이 없는 질문(일본어/스페인어/태국어/영어 등)은 점수가 신뢰하기 어렵다.
+    # (해시 임베딩은 한글/영문 bigram만 보고, 영문 단어가 우연히 겹쳐서 일부 메뉴만 걸리기도 한다.)
+    # 그래서 점수 순서로 정렬은 하되 전체 메뉴를 후보로 넘기고, LLM이 원문 질문을 보고 고르게 한다.
+    # "추천해줘"처럼 조건이 아직 넓은 한국어 문장도 같은 방식으로 전체를 넘긴다.
+    if not _contains_hangul(query):
+        candidates = scored
+    elif matched:
         candidates = matched
     elif _looks_like_recommendation_query(query):
         candidates = scored
@@ -212,7 +353,8 @@ def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
         return []
 
     candidates.sort(key=lambda item: (-item[0], item[1]))
-    return [document for _, _, document in candidates[:top_k]]
+    limit = _pool_limit(len(documents), top_k)
+    return [document for _, _, document in candidates[:limit]]
 
 
 def _extract_json_object(raw_text: str) -> str:
@@ -251,7 +393,7 @@ def _coerce_recommendation(
 
     return MenuRecommendationItem(
         menu_id=menu_id,
-        name=MENU_CATALOG[menu_id],
+        name=llm_service.MENU_CATALOG.get(menu_id) or document.metadata["name"],
         reason=_fallback_reason(query, document),
     )
 

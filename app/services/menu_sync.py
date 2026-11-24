@@ -17,6 +17,14 @@ BRAND_PREFIXES = ("리아",)
 FOREIGN_NAME_FIELDS = ("nameEn", "nameJa", "nameEs", "nameTh")
 LANGUAGE_NAME_FIELDS = {"ko": "nameKo", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
 ORDERABLE_STATUSES = {"ACTIVE", "SOLD_OUT"}
+# 추천 문서에 넣을 영양 정보 항목 (백엔드 nutrient 객체 키 -> 문서에 쓰는 이름). 순서대로 출력된다.
+NUTRIENT_LABELS = {
+    "calories": "칼로리",
+    "carbs": "탄수화물",
+    "fat": "지방",
+    "protein": "단백질",
+    "sodium": "나트륨",
+}
 
 _stop_event = threading.Event()
 
@@ -133,6 +141,58 @@ def build_options_by_id(payload: dict, catalog: dict[str, str]) -> dict[str, tup
     return result
 
 
+def _clean_list(value) -> tuple[str, ...]:
+    """문자열 또는 문자열 리스트를 공백 제거된 문자열 튜플로 바꾼다."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
+
+
+def _build_nutrition(nutrient) -> dict[str, int | float]:
+    """nutrient 객체에서 숫자 값만 골라 {표시 이름: 값}으로 만든다. 알려진 항목이 먼저, 나머지는 키 이름 그대로."""
+    if not isinstance(nutrient, dict):
+        return {}
+
+    def is_number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    result: dict[str, int | float] = {}
+    for key, label in NUTRIENT_LABELS.items():
+        if is_number(nutrient.get(key)):
+            result[label] = nutrient[key]
+    for key, value in nutrient.items():
+        if key not in NUTRIENT_LABELS and is_number(value):
+            result[str(key)] = value
+    return result
+
+
+def _clean_price(value) -> int | None:
+    """가격은 0 이상의 숫자만 받는다. 그 외(None, 문자열, bool, 음수)는 없는 값으로 본다."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return int(value)
+
+
+def build_menu_meta(payload: dict, catalog: dict[str, str]) -> dict[str, dict]:
+    """추천 문서에 쓸 카테고리, 설명, 알레르기, 영양 정보를 메뉴 ID별로 뽑는다."""
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    result: dict[str, dict] = {}
+    for menu in payload.get("menus", []) if isinstance(payload, dict) else []:
+        if not isinstance(menu, dict) or str(menu.get("menuId")) not in catalog:
+            continue
+        result[str(menu["menuId"])] = {
+            "category": _clean(menu.get("categoryKo")),
+            "description": _clean(menu.get("descriptionKo")),
+            "allergens": _clean_list(menu.get("allergensKo")),
+            "nutrition": _build_nutrition(menu.get("nutrient")),
+            "price": _clean_price(menu.get("price")),
+        }
+    return result
+
+
 def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
     payload = fetch_menu_payload(url)
     catalog, aliases, foreign = build_menu_catalog(payload)
@@ -143,6 +203,7 @@ def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
         source="backend",
         names_by_language=build_names_by_language(payload, catalog),
         options_by_id=build_options_by_id(payload, catalog),
+        meta_by_id=build_menu_meta(payload, catalog),
     )
     return llm_service.menu_catalog_summary()
 

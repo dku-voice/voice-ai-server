@@ -134,6 +134,8 @@ MENU_FOREIGN_NAMES: dict[str, tuple[str, ...]] = {}
 MENU_OPTIONS_BY_ID: dict[str, tuple[str, ...]] = {}
 MENU_NAMES_BY_LANGUAGE: dict[str, tuple[str, ...]] = {}
 MENU_SOURCE = "static"
+MENU_META_BY_ID: dict[str, dict[str, Any]] = {}
+MENU_VERSION = 0
 _menu_lock = threading.Lock()
 
 
@@ -238,8 +240,10 @@ def apply_menu_catalog(
     source: str,
     names_by_language: dict[str, tuple[str, ...]] | None = None,
     options_by_id: dict[str, tuple[str, ...]] | None = None,
+    meta_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_NAMES_BY_LANGUAGE, MENU_SOURCE, MENU_OPTIONS_BY_ID
+    global MENU_META_BY_ID, MENU_VERSION
     if not catalog:
         raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
     with _menu_lock:
@@ -249,7 +253,10 @@ def apply_menu_catalog(
         MENU_NAMES_BY_LANGUAGE = dict(names_by_language or {})
         MENU_OPTIONS_BY_ID = dict(options_by_id or {})
         MENU_SOURCE = source
-    logger.info("[MENU] 메뉴 %d종 적용 (source=%s)", len(catalog), source)
+        MENU_META_BY_ID = dict(meta_by_id or {})
+        MENU_VERSION += 1
+        version = MENU_VERSION
+    logger.info("[MENU] 메뉴 %d종 적용 (source=%s, version=%d)", len(catalog), source, version)
 
 
 def menu_names_for_language(language: str) -> tuple[str, ...]:
@@ -265,6 +272,7 @@ def menu_catalog_summary() -> dict:
     return {
         "source": MENU_SOURCE,
         "count": len(MENU_CATALOG),
+        "version": MENU_VERSION,
         "menus": [{"menu_id": k, "name": v} for k, v in MENU_CATALOG.items()],
     }
 
