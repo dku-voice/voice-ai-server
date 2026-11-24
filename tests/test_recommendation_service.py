@@ -24,22 +24,31 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertIn("cola_01", menu_ids)
 
     def test_retrieve_broad_recommendation_returns_default_candidates(self):
+        # 메뉴가 적으면 top_k와 상관없이 전체 메뉴를 점수순 후보로 넘긴다.
         docs = retrieve_menu_documents("메뉴 추천해줘", top_k=2)
 
-        self.assertEqual(len(docs), 2)
+        self.assertGreaterEqual(len(docs), 2)
         self.assertEqual(docs[0].metadata["menu_id"], "burger_01")
 
-    def test_retrieve_unrelated_query_returns_no_documents(self):
+    def test_retrieve_unrelated_query_returns_all_documents(self):
+        # 키워드가 하나도 안 걸려도 후보를 비우지 않고 전체를 넘긴다. (판단은 LLM이 한다)
         docs = retrieve_menu_documents("오늘 날씨 어때", top_k=3)
+        menu_ids = {doc.metadata["menu_id"] for doc in docs}
 
-        self.assertEqual(docs, [])
+        self.assertEqual(menu_ids, {"burger_01", "cola_01", "fries_01", "chicken_01"})
+
+    def test_retrieve_query_without_keyword_does_not_drop_menus(self):
+        # 이름/설명에 없는 말("싼 거" 등)이어도 후보가 0개가 되지 않는다.
+        docs = retrieve_menu_documents("싼 거 추천해줘", top_k=3)
+
+        self.assertGreaterEqual(len(docs), 3)
 
     def test_retrieve_partial_alias_uses_embedding(self):
-        """`후렌치`처럼 별칭 일부만 입력해도 임베딩 boost로 fries 후보가 노출된다."""
+        """`후렌치`처럼 별칭 일부만 입력해도 임베딩 boost로 fries 후보가 가장 앞에 온다."""
         docs = retrieve_menu_documents("후렌치 줘", top_k=1)
         menu_ids = [doc.metadata["menu_id"] for doc in docs]
 
-        self.assertEqual(menu_ids, ["fries_01"])
+        self.assertEqual(menu_ids[0], "fries_01")
 
     def test_retrieve_main_meal_query_prefers_main_category(self):
         """`메인 식사`류 쿼리는 main 카테고리 메뉴를 위쪽에 둔다."""
@@ -49,10 +58,11 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertIn("burger_01", menu_ids)
         self.assertNotIn(menu_ids[0], {"cola_01", "fries_01"})
 
-    def test_retrieve_top_k_caps_results_to_requested_count(self):
+    def test_retrieve_returns_candidate_pool_at_least_top_k(self):
+        # 검색은 LLM에 넘길 후보 풀을 돌려주므로 top_k 이상이다. 최종 top_k 제한은 응답 파싱 단계에서 적용된다.
         docs = retrieve_menu_documents("메뉴 추천해줘", top_k=3)
 
-        self.assertEqual(len(docs), 3)
+        self.assertGreaterEqual(len(docs), 3)
 
     def test_parse_recommendation_response_fills_name_and_deduplicates(self):
         docs = retrieve_menu_documents("사이드랑 음료 추천해줘", top_k=2)
@@ -72,7 +82,8 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertEqual(recommendations[0].name, "감자튀김")
 
     def test_parse_recommendation_response_rejects_menu_outside_retrieval(self):
-        docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
+        # 후보 풀이 전체 메뉴이므로, 후보가 한 개뿐인 상황을 직접 만들어 후보 밖 menu_id가 거부되는지 본다.
+        docs = [doc for doc in retrieve_menu_documents("음료 추천해줘", top_k=1) if doc.metadata["menu_id"] == "cola_01"]
         raw = '{"recommendations": [{"menu_id": "burger_01", "reason": "없는 후보입니다."}]}'
 
         with self.assertRaises(LLMResponseValidationError):
@@ -108,7 +119,8 @@ class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
             result = await recommend_menus("음료 추천해줘", top_k=1)
 
         self.assertEqual(result["status"], "fallback")
-        self.assertEqual(result["retrieved_menu_ids"], ["cola_01"])
+        # 후보는 전체 메뉴이고, 점수가 가장 높은 음료가 맨 앞에 온다.
+        self.assertEqual(result["retrieved_menu_ids"][0], "cola_01")
         self.assertEqual(result["recommendations"][0].menu_id, "cola_01")
 
     async def test_recommend_menus_falls_back_when_llm_response_is_invalid_json(self):
@@ -120,7 +132,7 @@ class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
             result = await recommend_menus("음료 추천해줘", top_k=1)
 
         self.assertEqual(result["status"], "fallback")
-        self.assertEqual(result["retrieved_menu_ids"], ["cola_01"])
+        self.assertEqual(result["retrieved_menu_ids"][0], "cola_01")
         self.assertEqual(len(result["recommendations"]), 1)
         self.assertEqual(result["recommendations"][0].menu_id, "cola_01")
         self.assertIn("LLM", result["error_msg"])
@@ -131,12 +143,20 @@ class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["recommendations"], [])
 
-    async def test_recommend_menus_returns_error_for_unrelated_query(self):
-        result = await recommend_menus("오늘 날씨 어때", top_k=3)
+    async def test_recommend_menus_passes_all_candidates_for_unrelated_query(self):
+        # 무관한 질문도 후보를 비우지 않고 LLM에 넘긴다. (이전에는 후보가 없어서 바로 error였다.)
+        # LLM이 설정되지 않은 환경을 흉내 내서 후보 구성만 확인한다.
+        with patch(
+            "app.services.recommendation_service._call_recommendation_llm_sync",
+            side_effect=LLMConfigurationError("missing key"),
+        ):
+            result = await recommend_menus("오늘 날씨 어때", top_k=3)
 
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["recommendations"], [])
-        self.assertEqual(result["retrieved_menu_ids"], [])
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(
+            set(result["retrieved_menu_ids"]),
+            {"burger_01", "cola_01", "fries_01", "chicken_01"},
+        )
 
 
 class RecommendationApiTest(unittest.TestCase):
