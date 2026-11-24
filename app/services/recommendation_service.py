@@ -337,21 +337,13 @@ def retrieve_menu_documents(query: str, top_k: int = 3) -> list[MenuDocument]:
         (_score_document(query, query_vector, document, embedding_index), index, document)
         for index, document in enumerate(documents)
     ]
-    matched = [item for item in scored if item[0] > 0]
 
-    # 한글이 없는 질문(일본어/스페인어/태국어/영어 등)은 점수가 신뢰하기 어렵다.
-    # (해시 임베딩은 한글/영문 bigram만 보고, 영문 단어가 우연히 겹쳐서 일부 메뉴만 걸리기도 한다.)
-    # 그래서 점수 순서로 정렬은 하되 전체 메뉴를 후보로 넘기고, LLM이 원문 질문을 보고 고르게 한다.
-    # "추천해줘"처럼 조건이 아직 넓은 한국어 문장도 같은 방식으로 전체를 넘긴다.
-    if not _contains_hangul(query):
-        candidates = scored
-    elif matched:
-        candidates = matched
-    elif _looks_like_recommendation_query(query):
-        candidates = scored
-    else:
-        return []
-
+    # 메뉴가 많지 않아서(FULL_POOL_LIMIT 이하) 언어와 상관없이 전체 메뉴를 점수 순으로 후보에 넘기고,
+    # 질문에 맞는 메뉴는 LLM이 문서(설명, 특징, 영양, 가격)를 보고 고르게 한다.
+    # 키워드 점수로 후보를 줄이면 "싼 거", "처음 왔는데", "아이가 먹기 좋은 거"처럼 이름/설명에 없는 말이나
+    # 우연히 한 단어만 겹치는 질문에서 정답이 후보에서 빠진다.
+    # (메뉴가 FULL_POOL_LIMIT를 넘으면 _pool_limit가 후보 수를 줄인다.)
+    candidates = scored
     candidates.sort(key=lambda item: (-item[0], item[1]))
     limit = _pool_limit(len(documents), top_k)
     return [document for _, _, document in candidates[:limit]]
