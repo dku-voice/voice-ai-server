@@ -2,7 +2,11 @@ import asyncio
 import logging
 import re
 
-from app.config import VOICE_RECOMMENDATION_BUDGET_SECONDS
+from app.config import (
+    VOICE_RECOMMENDATION_BUDGET_SECONDS,
+    VOICE_RECOMMENDATION_MIN_SECONDS,
+    VOICE_RESPONSE_DEADLINE_SECONDS,
+)
 from app.services import recommendation_service
 
 logger = logging.getLogger(__name__)
@@ -35,14 +39,20 @@ def _rule_based(query: str, top_k: int) -> list:
     return recommendation_service._fallback_recommendations(query, documents, top_k)
 
 
-async def recommend_for_voice(query: str, top_k: int = 3, language: str = "ko") -> dict:
+def recommendation_budget(elapsed_seconds: float) -> float:
+    remaining = VOICE_RESPONSE_DEADLINE_SECONDS - max(0.0, elapsed_seconds)
+    return max(VOICE_RECOMMENDATION_MIN_SECONDS, min(VOICE_RECOMMENDATION_BUDGET_SECONDS, remaining))
+
+
+async def recommend_for_voice(query: str, top_k: int = 3, language: str = "ko", elapsed_seconds: float = 0.0) -> dict:
+    budget = recommendation_budget(elapsed_seconds)
     try:
         result = await asyncio.wait_for(
             recommendation_service.recommend_menus(query, top_k=top_k, language=language),
-            timeout=VOICE_RECOMMENDATION_BUDGET_SECONDS,
+            timeout=budget,
         )
     except asyncio.TimeoutError:
-        logger.warning("[WS] 음성 추천 %.1f초 초과, 규칙 기반 추천 사용", VOICE_RECOMMENDATION_BUDGET_SECONDS)
+        logger.warning("[WS] 음성 추천 %.1f초 초과, 규칙 기반 추천 사용 (앞 단계 %.1f초)", budget, elapsed_seconds)
         return {"source": "fallback", "items": _rule_based(query, top_k)}
     except Exception as e:
         logger.error("[WS] 음성 추천 실패, 규칙 기반 추천 사용: %s", e)

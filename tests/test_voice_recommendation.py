@@ -70,6 +70,14 @@ class RecommendForVoiceTest(unittest.TestCase):
             asyncio.run(V.recommend_for_voice("おすすめは?", language="ja"))
         self.assertEqual(seen["language"], "ja")
 
+    def test_budget_shrinks_with_elapsed_time(self):
+        with patch.object(V, "VOICE_RESPONSE_DEADLINE_SECONDS", 10.5), \
+                patch.object(V, "VOICE_RECOMMENDATION_BUDGET_SECONDS", 6.5), \
+                patch.object(V, "VOICE_RECOMMENDATION_MIN_SECONDS", 1.0):
+            self.assertEqual(V.recommendation_budget(2.0), 6.5)
+            self.assertAlmostEqual(V.recommendation_budget(6.6), 3.9)
+            self.assertEqual(V.recommendation_budget(10.0), 1.0)
+
     def test_message_shape(self):
         result = {"source": "llm", "items": [MenuRecommendationItem(menu_id="2", name="리아 새우버거", reason="산뜻함")]}
         message = V.recommendation_message("산뜻한 거 추천해줘", "ko", result)
