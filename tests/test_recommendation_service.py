@@ -128,7 +128,7 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertIn("음료", recommendations[0].reason)
 
 
-def _live_like_document(menu_id, name, category, features, price):
+def _live_like_document(menu_id, name, category, features, price, nutrition=None):
     return _create_document(
         page_content=f"menu_id: {menu_id}\nname: {name}",
         metadata={
@@ -138,6 +138,7 @@ def _live_like_document(menu_id, name, category, features, price):
             "tags": [],
             "features": tuple(features),
             "price": price,
+            "nutrition": nutrition or {},
             "search_terms": [name, category],
             "match_text": f"{name} {category}",
         },
@@ -147,11 +148,20 @@ def _live_like_document(menu_id, name, category, features, price):
 class FallbackSelectionTest(unittest.TestCase):
     def setUp(self):
         self.docs = [
-            _live_like_document("1", "데리버거", "버거", ["달콤함", "아이 추천"], 2800),
-            _live_like_document("5", "핫크리스피 치킨버거", "버거", ["매콤함", "바삭함"], 4500),
-            _live_like_document("9", "양념감자", "사이드", ["바삭함", "아이 추천"], 2700),
-            _live_like_document("14", "콜라", "음료", ["달콤함"], 2100),
-            _live_like_document("17", "아이스아메리카노", "음료", [], 2600),
+            _live_like_document(
+                "1", "데리버거", "버거", ["달콤함", "아이 추천"], 2800,
+                {"칼로리": 356, "지방": 16, "단백질": 12, "나트륨": 590},
+            ),
+            _live_like_document(
+                "5", "핫크리스피 치킨버거", "버거", ["매콤함", "바삭함"], 4500,
+                {"칼로리": 503, "지방": 7.3, "단백질": 22, "나트륨": 900},
+            ),
+            _live_like_document(
+                "9", "양념감자", "사이드", ["바삭함", "아이 추천"], 2700,
+                {"칼로리": 359, "지방": 4.3, "단백질": 5, "나트륨": 520},
+            ),
+            _live_like_document("14", "콜라", "음료", ["달콤함"], 2100, {"칼로리": 128, "지방": 0, "나트륨": 15}),
+            _live_like_document("17", "아이스아메리카노", "음료", [], 2600, {"칼로리": 5, "지방": 0, "나트륨": 0}),
         ]
 
     def _ids(self, query, top_k=3):
@@ -173,6 +183,32 @@ class FallbackSelectionTest(unittest.TestCase):
 
     def test_fallback_keeps_score_order_without_matching_condition(self):
         self.assertEqual(self._ids("추천해줘"), ["1", "5", "9"])
+
+    def test_fallback_orders_by_fat_for_greasy_query(self):
+        # 음료는 카테고리를 말하지 않으면 제외하고, 지방이 높은 순으로 고른다.
+        self.assertEqual(self._ids("기름진 거"), ["1", "5", "9"])
+
+    def test_fallback_orders_by_low_fat_for_light_query(self):
+        self.assertEqual(self._ids("담백한 거"), ["9", "5", "1"])
+
+    def test_fallback_low_fat_query_for_drinks_keeps_drinks(self):
+        self.assertEqual(self._ids("담백한 음료"), ["14", "17"])
+
+    def test_fallback_orders_by_sodium_for_salty_query(self):
+        self.assertEqual(self._ids("짭짤한 거"), ["5", "1", "9"])
+
+    def test_fallback_orders_by_protein_and_skips_menus_without_value(self):
+        # 콜라/아메리카노는 단백질 수치가 없어서 빠진다.
+        self.assertEqual(self._ids("단백질 높은 거", top_k=5), ["5", "1", "9"])
+
+    def test_fallback_nutrition_query_respects_category(self):
+        self.assertEqual(self._ids("기름진 버거 추천해줘"), ["1", "5"])
+
+    def test_fallback_reason_mentions_nutrition_value(self):
+        item = _fallback_recommendations("기름진 거", self.docs, 1)[0]
+
+        self.assertIn("지방", item.reason)
+        self.assertIn("16g", item.reason)
 
     def test_fallback_reason_mentions_tag_or_price(self):
         tag_item = _fallback_recommendations("매운 거", self.docs, 1)[0]

@@ -214,6 +214,7 @@ def _live_document(menu_id: str, name: str) -> MenuDocument:
             "tags": [],
             "features": features,
             "price": price,
+            "nutrition": dict(nutrition),
             "search_terms": list(search_terms),
             "match_text": match_text,
         },
@@ -506,6 +507,14 @@ FALLBACK_FEATURE_TERMS: tuple[tuple[str, re.Pattern], ...] = (
     ("1인 추천", re.compile(r"혼자|1인")),
     ("대표 메뉴", re.compile(r"처음|대표|인기")),
 )
+# 영양 수치 기준 질문: (표현, 영양 항목, 높은 순이면 True / 낮은 순이면 False)
+FALLBACK_NUTRITION_RULES: tuple[tuple[re.Pattern, str, bool], ...] = (
+    (re.compile(r"기름진|느끼"), "지방", True),
+    (re.compile(r"담백|가벼운"), "지방", False),
+    (re.compile(r"칼로리\s*(?:가\s*)?낮|저칼로리|다이어트"), "칼로리", False),
+    (re.compile(r"짭짤|짠\s*(?:거|것|맛|음식|메뉴)|짜게"), "나트륨", True),
+    (re.compile(r"단백질|고단백"), "단백질", True),
+)
 FALLBACK_PRICE_PATTERN = re.compile(r"싼|싸게|싸고|저렴|가성비|값싼|가격\s*낮")
 FALLBACK_CATEGORY_TERMS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
     (re.compile(r"버거|햄버거"), ("버거", "main")),
@@ -517,15 +526,21 @@ FALLBACK_CATEGORY_TERMS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
 def _select_fallback_documents(
     query: str,
     documents: Sequence[MenuDocument],
-) -> tuple[list[MenuDocument], list[str], bool]:
-    """질문에서 카테고리 → 태그 → 가격 순서로 좁힌다. 좁힌 결과가 비면 그 단계는 건너뛴다."""
+) -> tuple[list[MenuDocument], list[str], bool, tuple[str, bool] | None]:
+    """
+    질문에서 카테고리 → 태그 → 영양 수치 → 가격 순서로 좁히거나 정렬한다.
+    좁힌 결과가 비면 그 단계는 건너뛴다.
+    반환값: (문서 목록, 맞은 태그, 가격순 여부, (영양 항목, 높은 순 여부) 또는 None)
+    """
     pool = list(documents)
 
+    category_chosen = False
     for pattern, categories in FALLBACK_CATEGORY_TERMS:
         if pattern.search(query):
             narrowed = [d for d in pool if d.metadata.get("category") in categories]
             if narrowed:
                 pool = narrowed
+                category_chosen = True
             break
 
     wanted = [tag for tag, pattern in FALLBACK_FEATURE_TERMS if pattern.search(query)]
@@ -536,14 +551,28 @@ def _select_fallback_documents(
             pool = narrowed
             matched_tags = wanted
 
+    nutrition_rule: tuple[str, bool] | None = None
+    for pattern, label, descending in FALLBACK_NUTRITION_RULES:
+        if not pattern.search(query):
+            continue
+        candidates = pool
+        if not category_chosen:
+            # 카테고리를 말하지 않았다면 음료는 빼고 본다. (음료는 지방/나트륨이 0에 가까워 낮은 순에서 항상 앞에 온다.)
+            candidates = [d for d in pool if d.metadata.get("category") not in ("음료", "drink")] or pool
+        with_value = [d for d in candidates if isinstance(d.metadata.get("nutrition", {}).get(label), (int, float))]
+        if with_value:
+            pool = sorted(with_value, key=lambda d: d.metadata["nutrition"][label], reverse=descending)
+            nutrition_rule = (label, descending)
+        break
+
     cheap = False
     if FALLBACK_PRICE_PATTERN.search(query):
         priced = [d for d in pool if d.metadata.get("price") is not None]
         if priced:
-            pool = sorted(priced, key=lambda d: d.metadata["price"])  # 같은 가격이면 점수 순서 유지
+            pool = sorted(priced, key=lambda d: d.metadata["price"])  # 같은 가격이면 이전 순서 유지
             cheap = True
 
-    return pool, matched_tags, cheap
+    return pool, matched_tags, cheap, nutrition_rule
 
 
 def _fallback_recommendations(
@@ -551,7 +580,7 @@ def _fallback_recommendations(
     documents: Sequence[MenuDocument],
     top_k: int,
 ) -> list[MenuRecommendationItem]:
-    selected, matched_tags, cheap = _select_fallback_documents(query, documents)
+    selected, matched_tags, cheap, nutrition_rule = _select_fallback_documents(query, documents)
     recommendations: list[MenuRecommendationItem] = []
     for document in selected[:top_k]:
         menu_id = document.metadata["menu_id"]
@@ -559,6 +588,11 @@ def _fallback_recommendations(
         document_tags = [tag for tag in matched_tags if tag in document.metadata.get("features", ())]
         if cheap and document.metadata.get("price") is not None:
             reason = f"가격이 낮은 순으로 골랐습니다. ({document.metadata['price']:,}원)"
+        elif nutrition_rule is not None:
+            label, descending = nutrition_rule
+            value = document.metadata["nutrition"][label]
+            unit = NUTRITION_UNITS.get(label, "")
+            reason = f"{label} 수치가 {'높은' if descending else '낮은'} 순으로 골랐습니다. ({_format_number(value)}{unit})"
         elif document_tags:
             reason = f"'{document_tags[0]}' 특징이 있는 메뉴입니다."
         recommendations.append(
