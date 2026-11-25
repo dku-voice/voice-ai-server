@@ -16,6 +16,55 @@ def _build_app() -> FastAPI:
     return app
 
 
+def _speech_patches(text, language="ko"):
+    vad_result = {
+        "has_speech": True,
+        "speech_audio": np.zeros(1600, dtype=np.float32),
+        "confidence": 0.99,
+    }
+    return (
+        patch("app.api.websockets.detect_speech_async", new=AsyncMock(return_value=vad_result)),
+        patch("app.api.websockets.transcribe_with_language", new=AsyncMock(return_value=(text, language))),
+    )
+
+
+class WebSocketRecommendationTest(unittest.TestCase):
+    def _run(self, text, extract_result=None, language="ko"):
+        audio_bytes = np.zeros(1600, dtype=np.int16).tobytes()
+        recommend = AsyncMock(return_value={"source": "llm", "items": []})
+        extract = AsyncMock(return_value=extract_result or {"status": "success", "items": [], "error_msg": None})
+        vad_patch, stt_patch = _speech_patches(text, language)
+        with vad_patch, stt_patch, \
+                patch("app.api.websockets.recommend_for_voice", new=recommend), \
+                patch("app.api.websockets.extract_order", new=extract):
+            with TestClient(_build_app()).websocket_connect("/ws/audio") as ws:
+                ws.send_bytes(audio_bytes)
+                ws.send_text("END")
+                result = ws.receive_json()
+        return result, recommend, extract
+
+    def test_recommendation_request_skips_order_parsing(self):
+        result, recommend, extract = self._run("산뜻한 거 추천해줘")
+        self.assertEqual(result["type"], "recommendation")
+        self.assertEqual(result["recognized_text"], "산뜻한 거 추천해줘")
+        self.assertNotIn("status", result)
+        recommend.assert_awaited_once()
+        extract.assert_not_awaited()
+
+    def test_preference_without_menu_becomes_recommendation(self):
+        result, recommend, extract = self._run("산뜻한 거 있어요?")
+        self.assertEqual(result["type"], "recommendation")
+        extract.assert_awaited_once()
+        recommend.assert_awaited_once()
+
+    def test_normal_order_stays_order(self):
+        order = {"status": "success", "items": [OrderItem(menu_id="1", quantity=2, options=[])], "error_msg": None}
+        result, recommend, _ = self._run("데리버거 두 개 주세요", extract_result=order)
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("type", result)
+        recommend.assert_not_awaited()
+
+
 class WebSocketAudioTest(unittest.TestCase):
     def test_empty_end_returns_empty_success_response(self):
         with TestClient(_build_app()).websocket_connect("/ws/audio") as ws:

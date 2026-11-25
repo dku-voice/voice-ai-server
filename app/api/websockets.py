@@ -15,6 +15,12 @@ from app.schemas import VoiceOrderResponse
 from app.services.vad_service import detect_speech_async, bytes_to_float32
 from app.services.stt_service import transcribe_with_language
 from app.services.llm_service import extract_order
+from app.services.voice_recommendation import (
+    has_preference_cue,
+    is_recommendation_request,
+    recommend_for_voice,
+    recommendation_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +65,19 @@ def _validate_raw_pcm_audio(audio_bytes: bytes) -> str | None:
         return "PCM 16-bit 오디오는 바이트 길이가 짝수여야 합니다."
 
     return None
+
+
+async def _send_recommendation(ws: WebSocket, recognized_text: str, language: str, chain_start: float) -> None:
+    logger.info("[WS] Stage 3: 메뉴 추천 요청으로 처리")
+    result = await recommend_for_voice(recognized_text)
+    message = recommendation_message(recognized_text, language, result)
+    await ws.send_json(message)
+    logger.info(
+        "[WS] 추천 응답 전송 완료: source=%s, items=%s건 (전체 %.1fms)",
+        message["source"],
+        len(message["items"]),
+        (time.perf_counter() - chain_start) * 1000.0,
+    )
 
 
 @router.websocket("/ws/audio")
@@ -244,6 +263,10 @@ async def audio_websocket(ws: WebSocket):
                 )
                 continue
 
+            if is_recommendation_request(recognized_text):
+                await _send_recommendation(ws, recognized_text, language, chain_start)
+                continue
+
             # ===== Stage 3: LLM (텍스트 → 주문 파싱) =====
             logger.info("[WS] Stage 3: LLM 주문 파싱 중...")
             stage_start = time.perf_counter()
@@ -252,6 +275,10 @@ async def audio_websocket(ws: WebSocket):
                 "[WS] Stage 3 LLM 완료 (소요 %.1fms)",
                 (time.perf_counter() - stage_start) * 1000.0,
             )
+
+            if not llm_result["items"] and llm_result["status"] != "error" and has_preference_cue(recognized_text):
+                await _send_recommendation(ws, recognized_text, language, chain_start)
+                continue
 
             # 프론트로 보낼 최종 응답
             response = VoiceOrderResponse(
