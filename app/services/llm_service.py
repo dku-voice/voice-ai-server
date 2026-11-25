@@ -763,6 +763,15 @@ def _foreign_keyword_parse(text: str, language: str) -> List[OrderItem]:
     return _merge_duplicate_items(items)
 
 
+def describe_items(items: List[OrderItem]) -> str:
+    parts = []
+    for item in items:
+        name = MENU_CATALOG.get(item.menu_id, item.menu_id)
+        options = f" [{', '.join(item.options)}]" if item.options else ""
+        parts.append(f"{name} x{item.quantity}{options}")
+    return ", ".join(parts) or "없음"
+
+
 def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str = "ko") -> List[OrderItem]:
     """
     LLM이 실패했을 때 마지막으로 쓰는 키워드 매칭.
@@ -783,7 +792,7 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
                     for item in fuzzy_items
                 ]
         if log_result:
-            logger.info("[LLM-Fallback] %s 키워드 매칭 결과: %s건", language, len(items))
+            logger.info("[LLM-Fallback] %s 키워드 매칭 결과: %s건 (%s)", language, len(items), describe_items(items))
         return items
 
     normalized_text = _normalize_order_text(text)
@@ -808,7 +817,7 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
 
     items = _merge_duplicate_items(items)
     if log_result:
-        logger.info("[LLM-Fallback] 키워드 매칭 결과: %s건", len(items))
+        logger.info("[LLM-Fallback] 키워드 매칭 결과: %s건 (%s)", len(items), describe_items(items))
     return items
 
 
@@ -982,7 +991,7 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
             raise LLMResponseValidationError("LLM 응답 content가 None입니다.")
 
         items = _parse_llm_response(raw, text, language)
-        logger.info("[LLM] Phase 1 성공. %s건 파싱됨", len(items))
+        logger.info("[LLM] Phase 1 성공. %s건 파싱됨 (%s)", len(items), describe_items(items))
         return ("success", items)
 
     except LLMConfigurationError as e:
