@@ -8,6 +8,7 @@ json.loads()에서 바로 터졌다. 그래서 지금은 JSON 파싱, 메뉴/수
 import json
 import logging
 import re
+import unicodedata
 import threading
 from typing import Any, List
 
@@ -521,6 +522,14 @@ FOREIGN_OPTION_SYNONYMS: dict[str, dict[str, str]] = {
         "オニオン抜き": "양파 제거",
         "トマトなし": "토마토 제거",
         "チーズ多め": "치즈 추가",
+        "たまねぎぬき": "양파 제거",
+        "たまねぎなし": "양파 제거",
+        "おにおんぬき": "양파 제거",
+        "とまとぬき": "토마토 제거",
+        "とまとなし": "토마토 제거",
+        "ちーずついか": "치즈 추가",
+        "べーこんついか": "베이컨 추가",
+        "そーすすくなめ": "소스 적게",
     },
     "es": {
         "queso extra": "치즈 추가",
@@ -633,6 +642,90 @@ def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tu
     return matches
 
 
+JA_KANA_QUANTITY_PATTERN = re.compile("([0-9]+|[一二三四五六七八九十])(?:ツ|個|コ|本|杯|枚|人前|点)")
+JA_LONG_VOWEL_AFTER_O = re.compile("([オコソトノホモヨロヲゴゾドボポ])ウ")
+
+
+def _ja_kana_key(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in text)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if c not in "\u3099\u309a")
+    text = unicodedata.normalize("NFC", text)
+    text = JA_LONG_VOWEL_AFTER_O.sub(r"\1", text)
+    return re.sub(r"[\sー・、。,.!?！？「」]", "", text).lower()
+
+
+def _levenshtein_at_most(a: str, b: str, limit: int) -> bool:
+    if abs(len(a) - len(b)) > limit:
+        return False
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb))
+        if min(current) > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit
+
+
+def _ja_fuzzy_menu_matches(key: str) -> list[tuple[int, int, str]]:
+    names: list[tuple[str, str]] = []
+    for menu_id, aliases in MENU_ALIASES.items():
+        for alias in aliases:
+            alias_key = _ja_kana_key(alias)
+            if len(alias_key) >= 2 and any("ァ" <= c <= "ヺ" for c in alias_key):
+                names.append((alias_key, menu_id))
+    names.sort(key=lambda item: len(item[0]), reverse=True)
+    candidates = []
+    for name, menu_id in names:
+        limit = 0 if len(name) < 4 else (1 if len(name) < 8 else 2)
+        for size in range(max(1, len(name) - limit), len(name) + limit + 1):
+            for start in range(0, len(key) - size + 1):
+                if _levenshtein_at_most(key[start:start + size], name, limit):
+                    candidates.append((start, start + size, menu_id, len(name)))
+    candidates.sort(key=lambda c: (-c[3], c[0]))
+    matches: list[tuple[int, int, str]] = []
+    for start, end, menu_id, _ in candidates:
+        if any(start < e and s < end for s, e, _ in matches):
+            continue
+        matches.append((start, end, menu_id))
+    return sorted(matches)
+
+
+def _ja_fuzzy_parse(text: str) -> List[OrderItem]:
+    key = _ja_kana_key(text)
+    menu_matches = _ja_fuzzy_menu_matches(key)
+    if not menu_matches:
+        return []
+    option_names = {}
+    for name, korean in list(FOREIGN_OPTION_SYNONYMS.get("ja", {}).items()) + list(OPTION_NAMES_BY_LANGUAGE.get("ja", {}).items()):
+        option_names[_ja_kana_key(name)] = korean
+    quantity_words = {_ja_kana_key(word): value for word, value in JA_QUANTITY_WORDS.items()}
+    items: List[OrderItem] = []
+    for position, (start, end, menu_id) in enumerate(menu_matches):
+        next_start = menu_matches[position + 1][0] if position + 1 < len(menu_matches) else len(key)
+        segment = key[end:next_start]
+        quantity = 1
+        for word, value in sorted(quantity_words.items(), key=lambda item: -len(item[0])):
+            if word and word in segment[:FOREIGN_QUANTITY_WINDOW]:
+                quantity = value
+                break
+        else:
+            match = JA_KANA_QUANTITY_PATTERN.search(segment[:FOREIGN_QUANTITY_WINDOW])
+            if match:
+                token = match.group(1)
+                value = int(token) if token.isdigit() else JA_KANJI_DIGITS[token]
+                quantity = _clamp_quantity(value) or 1
+        options = []
+        for name, korean in option_names.items():
+            if name and name in segment and korean not in options:
+                options.append(korean)
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
+    return _merge_duplicate_items(items)
+
+
 def _foreign_keyword_parse(text: str, language: str) -> List[OrderItem]:
     normalized_text, index_map = _normalize_with_map(text)
     menu_matches = _find_menu_matches(normalized_text)
@@ -662,6 +755,8 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
     """
     if language in FOREIGN_FALLBACK_LANGUAGES:
         items = _foreign_keyword_parse(text, language)
+        if not items and language == "ja":
+            items = _ja_fuzzy_parse(text)
         if log_result:
             logger.info("[LLM-Fallback] %s 키워드 매칭 결과: %s건", language, len(items))
         return items
