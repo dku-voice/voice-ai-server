@@ -147,6 +147,17 @@ class ForeignFallbackTest(unittest.TestCase):
             [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
         )
 
+    def test_spanish_everyday_menu_words(self):
+        self.assertEqual(
+            self.parse("¡Dosteri burjerse en cebolla! ¡Unches estiquití tres colas, por favor!", "es"),
+            [("1", 2, ["양파 제거"]), ("14", 3, [])],
+        )
+        self.assertEqual(
+            self.parse("¡Dos teri burgers sin cebolla! Unos cheese sticks y tres colas, por favor", "es"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+        self.assertEqual(self.parse("dos coca colas y unos palitos", "es"), [("14", 2, []), ("11", 1, [])])
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])
