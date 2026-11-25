@@ -113,6 +113,20 @@ class ForeignFallbackTest(unittest.TestCase):
         self.assertEqual(self.parse("こーらをふたつください", "ja"), [("14", 2, [])])
         self.assertEqual(self.parse("ぜろしゅがーこーら", "ja"), [("15", 1, [])])
 
+    def test_japanese_misheard_long_order_keeps_every_menu(self):
+        self.assertEqual(
+            self.parse("テリバーガーをタッツタマネギに抜きて それぞれチーズスティックを 土地と コラウミッツ ください", "ja"),
+            [("1", 1, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+        self.assertEqual(
+            self.parse("テリバがオフタチタマネギを抜きで、それとチーズスティックを一つどこらを見つくださり。", "ja"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 1, [])],
+        )
+        self.assertEqual(
+            self.parse("テリバーガーをふたつ、玉ねぎ抜きで、それとチーズスティックをひとつとコーラをみっつください", "ja"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])

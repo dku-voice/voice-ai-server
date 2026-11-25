@@ -500,6 +500,7 @@ FOREIGN_FALLBACK_LANGUAGES = ("ja", "es", "th")
 JA_QUANTITY_WORDS = {
     "ひとつ": 1, "ふたつ": 2, "みっつ": 3, "よっつ": 4, "いつつ": 5,
     "むっつ": 6, "ななつ": 7, "やっつ": 8, "ここのつ": 9, "とお": 10,
+    "ふたち": 2, "みつつ": 3,
 }
 JA_KANJI_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 JA_QUANTITY_PATTERN = re.compile(
@@ -568,6 +569,7 @@ def _clamp_quantity(value: int) -> int | None:
 
 
 def _ja_quantity(segment: str) -> int | None:
+    segment = "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in segment)
     match = JA_QUANTITY_PATTERN.search(segment)
     if not match:
         return None
@@ -626,8 +628,18 @@ def _foreign_option_names(language: str) -> dict[str, str]:
     return {_normalize_order_text(name): korean for name, korean in names.items() if name and korean}
 
 
+JA_OPTION_PATTERNS = (
+    (re.compile("(?:玉ねぎ|玉葱|たまねぎ|タマネギ|タマネキ|おにおん|オニオン).{0,2}?(?:抜|ぬき|ヌキ|なし|ナシ)"), "양파 제거"),
+    (re.compile("(?:とまと|トマト).{0,2}?(?:抜|ぬき|ヌキ|なし|ナシ)"), "토마토 제거"),
+)
+
+
 def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tuple[int, int, str]]:
     candidates = []
+    if language == "ja":
+        for pattern, korean in JA_OPTION_PATTERNS:
+            for match in pattern.finditer(normalized_text):
+                candidates.append((match.start(), match.end(), korean))
     for name, korean in _foreign_option_names(language).items():
         start_idx = normalized_text.find(name)
         while start_idx != -1:
@@ -722,6 +734,9 @@ def _ja_fuzzy_parse(text: str) -> List[OrderItem]:
         for name, korean in option_names.items():
             if name and name in segment and korean not in options:
                 options.append(korean)
+        for pattern, korean in JA_OPTION_PATTERNS:
+            if pattern.search(segment) and korean not in options:
+                options.append(korean)
         items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
     return _merge_duplicate_items(items)
 
@@ -755,8 +770,18 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
     """
     if language in FOREIGN_FALLBACK_LANGUAGES:
         items = _foreign_keyword_parse(text, language)
-        if not items and language == "ja":
-            items = _ja_fuzzy_parse(text)
+        if language == "ja":
+            fuzzy_items = _ja_fuzzy_parse(text)
+            if len(fuzzy_items) > len(items):
+                exact_options = {item.menu_id: item.options for item in items}
+                items = [
+                    OrderItem(
+                        menu_id=item.menu_id,
+                        quantity=item.quantity,
+                        options=_filter_options(item.menu_id, list(dict.fromkeys(item.options + exact_options.get(item.menu_id, [])))),
+                    )
+                    for item in fuzzy_items
+                ]
         if log_result:
             logger.info("[LLM-Fallback] %s 키워드 매칭 결과: %s건", language, len(items))
         return items
