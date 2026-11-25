@@ -15,6 +15,7 @@ from app.schemas import VoiceOrderResponse
 from app.services.vad_service import detect_speech_async, bytes_to_float32
 from app.services.stt_service import transcribe_with_language
 from app.services.llm_service import extract_order
+from app.services.order_deadline import extract_order_within_deadline
 from app.services.voice_recommendation import (
     has_preference_cue,
     is_recommendation_request,
@@ -274,7 +275,12 @@ async def audio_websocket(ws: WebSocket):
             # ===== Stage 3: LLM (텍스트 → 주문 파싱) =====
             logger.info("[WS] Stage 3: LLM 주문 파싱 중...")
             stage_start = time.perf_counter()
-            llm_result = await extract_order(recognized_text, language)
+            llm_result = await extract_order_within_deadline(
+                extract_order,
+                recognized_text,
+                language,
+                time.perf_counter() - chain_start,
+            )
             logger.info(
                 "[WS] Stage 3 LLM 완료 (소요 %.1fms)",
                 (time.perf_counter() - stage_start) * 1000.0,
