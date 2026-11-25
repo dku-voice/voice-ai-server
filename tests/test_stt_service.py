@@ -130,6 +130,43 @@ class LanguagePickTest(unittest.TestCase):
         self.assertEqual(calls[1][0], "ko")
         self.assertIn("콜라", calls[1][1])
 
+    def _run_with_screen(self, screen, detected, probability):
+        old_model = stt_service._whisper_model
+        calls = []
+
+        class DummyModel:
+            def transcribe(self, audio_data, language, beam_size, hotwords=None):
+                calls.append((language, hotwords))
+                info = SimpleNamespace(language=language or detected, language_probability=probability, all_language_probs=None)
+                return iter([SimpleNamespace(text="texto")]), info
+
+        stt_service._whisper_model = DummyModel()
+        names = {"ko": ("데리버거", "콜라"), "es": ("Hamburguesa Teri", "Cola")}
+        try:
+            with patch("app.services.llm_service.menu_names_for_language", side_effect=lambda lang: names.get(lang, ())):
+                result = stt_service._transcribe_sync(np.zeros(1600, dtype=np.float32), screen)
+        finally:
+            stt_service._whisper_model = old_model
+        return result, calls
+
+    def test_screen_language_hotwords_need_only_one_pass(self):
+        result, calls = self._run_with_screen("es", "es", 0.9)
+        self.assertEqual(result[1], "es")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Hamburguesa Teri", calls[0][1])
+
+    def test_korean_screen_needs_only_one_pass(self):
+        result, calls = self._run_with_screen("ko", "ko", 0.97)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("데리버거", calls[0][1])
+
+    def test_other_language_on_screen_still_retranscribes(self):
+        result, calls = self._run_with_screen("es", "ko", 0.97)
+        self.assertEqual(result[1], "ko")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][0], "ko")
+        self.assertIn("데리버거", calls[1][1])
+
     def test_korean_hotwords_drop_brand_prefix(self):
         with patch("app.services.llm_service.menu_names_for_language", return_value=("데리버거", "리아 불고기버거", "리아 새우버거")):
             hotwords = stt_service._hotwords_for("ko")
@@ -137,6 +174,7 @@ class LanguagePickTest(unittest.TestCase):
 
     def test_hotwords_are_not_used_for_foreign_languages(self):
         self.assertIsNone(stt_service._hotwords_for("ja"))
+        self.assertIsNone(stt_service._hotwords_for("th"))
         self.assertIn("콜라", stt_service._hotwords_for("ko"))
 
 

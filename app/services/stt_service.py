@@ -152,17 +152,19 @@ def _transcribe_sync(audio_data: np.ndarray, preferred_language: str | None = No
     """
     model = _get_model()
 
+    first_hotwords = _hotwords_for(STT_LANGUAGE or preferred_language)
+
     with _whisper_transcribe_lock:
         segments, info = model.transcribe(
             audio_data,
             language=STT_LANGUAGE,
             beam_size=5,
-            hotwords=_hotwords_for(STT_LANGUAGE) if STT_LANGUAGE else None,
+            hotwords=first_hotwords,
         )
 
         language = STT_LANGUAGE or _pick_language(info, preferred_language)
         hotwords = _hotwords_for(language)
-        if not STT_LANGUAGE and (language != info.language or hotwords):
+        if not STT_LANGUAGE and (language != info.language or (hotwords and hotwords != first_hotwords)):
             if language != info.language:
                 logger.info(
                     "[STT] 감지 언어 %s(prob=%.2f) 대신 %s로 다시 인식",
