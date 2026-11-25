@@ -28,7 +28,7 @@ class RecommendationIntentTest(unittest.TestCase):
 
 class RecommendForVoiceTest(unittest.TestCase):
     def test_llm_result_is_used(self):
-        async def fake(query, top_k=3):
+        async def fake(query, top_k=3, language="ko"):
             return {"status": "success", "recommendations": [MenuRecommendationItem(menu_id="2", name="리아 새우버거", reason="산뜻함")]}
 
         with patch.object(V.recommendation_service, "recommend_menus", fake):
@@ -37,7 +37,7 @@ class RecommendForVoiceTest(unittest.TestCase):
         self.assertEqual([i.menu_id for i in result["items"]], ["2"])
 
     def test_slow_llm_falls_back_within_budget(self):
-        async def slow(query, top_k=3):
+        async def slow(query, top_k=3, language="ko"):
             await asyncio.sleep(5)
             return {"status": "success", "recommendations": []}
 
@@ -50,7 +50,7 @@ class RecommendForVoiceTest(unittest.TestCase):
         self.assertEqual(result["items"], rule_items)
 
     def test_empty_llm_result_uses_rules(self):
-        async def empty(query, top_k=3):
+        async def empty(query, top_k=3, language="ko"):
             return {"status": "success", "recommendations": []}
 
         rule_items = [MenuRecommendationItem(menu_id="14", name="콜라", reason="가격이 낮은 순으로 골랐습니다.")]
@@ -58,6 +58,17 @@ class RecommendForVoiceTest(unittest.TestCase):
                 patch.object(V, "_rule_based", return_value=rule_items):
             result = asyncio.run(V.recommend_for_voice("싼 거 추천"))
         self.assertEqual(result["items"], rule_items)
+
+    def test_language_is_passed_to_recommendation(self):
+        seen = {}
+
+        async def fake(query, top_k=3, language="ko"):
+            seen["language"] = language
+            return {"status": "success", "recommendations": [MenuRecommendationItem(menu_id="2", name="리아 새우버거", reason="さっぱり")]}
+
+        with patch.object(V.recommendation_service, "recommend_menus", fake):
+            asyncio.run(V.recommend_for_voice("おすすめは?", language="ja"))
+        self.assertEqual(seen["language"], "ja")
 
     def test_message_shape(self):
         result = {"source": "llm", "items": [MenuRecommendationItem(menu_id="2", name="리아 새우버거", reason="산뜻함")]}

@@ -35,10 +35,10 @@ def _rule_based(query: str, top_k: int) -> list:
     return recommendation_service._fallback_recommendations(query, documents, top_k)
 
 
-async def recommend_for_voice(query: str, top_k: int = 3) -> dict:
+async def recommend_for_voice(query: str, top_k: int = 3, language: str = "ko") -> dict:
     try:
         result = await asyncio.wait_for(
-            recommendation_service.recommend_menus(query, top_k=top_k),
+            recommendation_service.recommend_menus(query, top_k=top_k, language=language),
             timeout=VOICE_RECOMMENDATION_BUDGET_SECONDS,
         )
     except asyncio.TimeoutError:

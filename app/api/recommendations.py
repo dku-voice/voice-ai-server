@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 async def recommend_menu(request: MenuRecommendationRequest):
     """고객 요청 문장에 맞는 메뉴 후보를 추천한다."""
     try:
-        result = await recommend_menus(request.query, top_k=request.top_k)
+        result = await recommend_menus(request.query, top_k=request.top_k, language=request.language)
         return MenuRecommendationResponse(**result)
     except Exception as e:
         logger.error("[RAG] 메뉴 추천 처리 중 예상치 못한 오류: %s", e, exc_info=True)
