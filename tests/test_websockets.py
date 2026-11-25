@@ -209,3 +209,27 @@ class WebSocketAudioTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebSocketScreenLanguageTest(unittest.TestCase):
+    def _send(self, end_message):
+        audio_bytes = np.zeros(1600, dtype=np.int16).tobytes()
+        vad_patch, _ = _speech_patches("Cola", "es")
+        stt = AsyncMock(return_value=("Cola", "es"))
+        extract = AsyncMock(return_value={"status": "success", "items": [], "error_msg": None})
+        with vad_patch, patch("app.api.websockets.transcribe_with_language", new=stt), \
+                patch("app.api.websockets.extract_order", new=extract):
+            with TestClient(_build_app()).websocket_connect("/ws/audio") as ws:
+                ws.send_bytes(audio_bytes)
+                ws.send_text(end_message)
+                ws.receive_json()
+        return stt.await_args.args[1]
+
+    def test_screen_language_is_passed_to_stt(self):
+        self.assertEqual(self._send("END:es"), "es")
+
+    def test_plain_end_has_no_hint(self):
+        self.assertIsNone(self._send("END"))
+
+    def test_unknown_hint_is_ignored(self):
+        self.assertIsNone(self._send("END:xx"))
