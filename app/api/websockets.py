@@ -10,7 +10,7 @@ import logging
 import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config import WS_RECEIVE_TIMEOUT_SECONDS
+from app.config import SUPPORTED_LANGUAGES, WS_RECEIVE_TIMEOUT_SECONDS
 from app.schemas import VoiceOrderResponse
 from app.services.vad_service import detect_speech_async, bytes_to_float32
 from app.services.stt_service import transcribe_with_language
@@ -107,6 +107,7 @@ async def audio_websocket(ws: WebSocket):
             # 프론트가 녹음 중에는 bytes chunk를 계속 보내고,
             # "END"가 오면 한 주문이 끝난 것으로 본다.
             audio_buffer = bytearray()
+            screen_language = None
 
             while True:
                 try:
@@ -136,8 +137,11 @@ async def audio_websocket(ws: WebSocket):
                 # 텍스트 메시지는 지금 "END"만 의미 있게 쓴다.
                 if "text" in data:
                     msg = data["text"]
-                    if msg.strip().upper() == "END":
-                        logger.info("[WS] 녹음 종료 신호 수신 (수집된 bytes: %s)", len(audio_buffer))
+                    command, _, hint = msg.strip().partition(":")
+                    if command.upper() == "END":
+                        hint = hint.strip().lower()
+                        screen_language = hint if hint in SUPPORTED_LANGUAGES else None
+                        logger.info("[WS] 녹음 종료 신호 수신 (수집된 bytes: %s, 화면 언어: %s)", len(audio_buffer), screen_language or "-")
                         break
                     # END가 아닌 텍스트는 일단 무시한다.
                     continue
@@ -236,7 +240,7 @@ async def audio_websocket(ws: WebSocket):
             logger.info("[WS] Stage 2: STT 처리 중...")
             stage_start = time.perf_counter()
             try:
-                recognized_text, language = await transcribe_with_language(speech_audio)
+                recognized_text, language = await transcribe_with_language(speech_audio, screen_language)
                 logger.info(
                     "[WS] Stage 2 STT 완료 (소요 %.1fms): '%s' (lang=%s)",
                     (time.perf_counter() - stage_start) * 1000.0,

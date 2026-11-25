@@ -21,6 +21,7 @@ from app.config import (
     STT_LANGUAGE,
     SUPPORTED_LANGUAGES,
     DEFAULT_LANGUAGE,
+    LANGUAGE_HINT_MIN_PROBABILITY,
     LANGUAGE_MIN_PROBABILITY,
     STT_HOTWORD_LANGUAGES,
 )
@@ -95,7 +96,8 @@ def get_model_status() -> dict:
     }
 
 
-def _pick_language(info) -> str:
+def _pick_language(info, preferred: str | None = None) -> str:
+    fallback = preferred if preferred in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
     detected = info.language
     probability = info.language_probability or 0.0
 
@@ -106,11 +108,12 @@ def _pick_language(info) -> str:
             if lang in SUPPORTED_LANGUAGES
         ]
         if not candidates:
-            return DEFAULT_LANGUAGE
+            return fallback
         detected, probability = max(candidates, key=lambda c: c[1])
 
-    if detected != DEFAULT_LANGUAGE and probability < LANGUAGE_MIN_PROBABILITY:
-        return DEFAULT_LANGUAGE
+    threshold = LANGUAGE_HINT_MIN_PROBABILITY if fallback != DEFAULT_LANGUAGE else LANGUAGE_MIN_PROBABILITY
+    if detected != fallback and probability < threshold:
+        return fallback
     return detected
 
 
@@ -139,7 +142,7 @@ def _hotwords_for(language: str | None) -> str | None:
     return ", ".join(names)[:400]
 
 
-def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
+def _transcribe_sync(audio_data: np.ndarray, preferred_language: str | None = None) -> tuple[str, str]:
     """
     실제 faster-whisper 호출.
     이 함수는 무거우므로 async 핸들러에서 바로 부르면 안 된다.
@@ -157,7 +160,7 @@ def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
             hotwords=_hotwords_for(STT_LANGUAGE) if STT_LANGUAGE else None,
         )
 
-        language = STT_LANGUAGE or _pick_language(info)
+        language = STT_LANGUAGE or _pick_language(info, preferred_language)
         hotwords = _hotwords_for(language)
         if not STT_LANGUAGE and (language != info.language or hotwords):
             if language != info.language:
@@ -192,14 +195,14 @@ def _transcribe_sync(audio_data: np.ndarray) -> tuple[str, str]:
     return result_text, language
 
 
-async def transcribe_with_language(audio_data: np.ndarray) -> tuple[str, str]:
+async def transcribe_with_language(audio_data: np.ndarray, preferred_language: str | None = None) -> tuple[str, str]:
     """
     FastAPI 쪽에서 쓰는 비동기 wrapper.
     내부 STT는 동기 함수라 제한된 threadpool로 감싼다.
     """
     logger.debug("[STT] 비동기 transcribe 시작 (audio shape: %s)", audio_data.shape)
 
-    text, language = await run_model_task(_transcribe_sync, audio_data)
+    text, language = await run_model_task(_transcribe_sync, audio_data, preferred_language)
 
     logger.info("[STT] 결과: %s (lang=%s)", text, language)
     return text, language
