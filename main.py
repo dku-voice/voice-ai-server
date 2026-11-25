@@ -8,6 +8,8 @@ FastAPI 앱 생성 + 라우터 등록 + 모델 로딩
 import logging
 from contextlib import asynccontextmanager
 
+import numpy as np
+
 from fastapi import FastAPI
 
 from app.api.recommendations import router as recommendations_router
@@ -16,9 +18,10 @@ from app.services.menu_sync import start_menu_sync, stop_menu_sync
 from app.api.vision import router as vision_router
 from app.api.websockets import router as ws_router
 from app.config import VISION_WARMUP_ON_STARTUP
-from app.services.vad_service import _load_vad_model
+from app.services.vad_service import _load_vad_model, detect_speech
 from app.services.stt_service import get_model_status as get_stt_model_status
 from app.services.stt_service import load_model as load_stt_model
+from app.services.stt_service import _transcribe_sync
 from app.services.threadpool import run_model_task
 from app.services.vision_service import warm_up_deepface
 
@@ -29,6 +32,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _warm_up_voice_models():
+    noise = (np.random.default_rng(0).standard_normal(16000 * 2) * 0.01).astype(np.float32)
+    detect_speech((noise * 32767).astype(np.int16).tobytes())
+    _transcribe_sync(noise)
 
 
 @asynccontextmanager
@@ -57,6 +66,13 @@ async def lifespan(app: FastAPI):
         logger.info("[Startup] VAD 모델 로딩 완료")
     except Exception as e:
         logger.warning("[Startup] VAD 모델 미리 로딩 실패, 첫 요청 때 다시 시도합니다: %s", e)
+
+    logger.info("[Startup] 음성 모델 워밍업 중...")
+    try:
+        await run_model_task(_warm_up_voice_models)
+        logger.info("[Startup] 음성 모델 워밍업 완료")
+    except Exception as e:
+        logger.warning("[Startup] 음성 모델 워밍업 실패, 첫 요청이 느릴 수 있습니다: %s", e)
 
     if VISION_WARMUP_ON_STARTUP:
         logger.info("[Startup] DeepFace 연령 추정 모델 워밍업 중...")
