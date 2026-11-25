@@ -375,3 +375,25 @@ class RecommendationApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RecommendationReasonLanguageTest(unittest.TestCase):
+    def test_reason_language_instruction(self):
+        from app.services import recommendation_service as R
+        self.assertIn("일본어", R._reason_language_instruction("ja"))
+        self.assertIn("태국어", R._reason_language_instruction("th"))
+        self.assertIn("한국어", R._reason_language_instruction("unknown"))
+
+    def test_prompt_includes_reason_language(self):
+        from unittest.mock import MagicMock, patch
+        from app.services import recommendation_service as R
+        documents = R.retrieve_menu_documents("추천해줘", top_k=3)
+        fake_client = MagicMock()
+        fake_client.with_options.return_value = fake_client
+        menu_id = documents[0].metadata["menu_id"]
+        fake_client.chat.completions.create.return_value.choices = [
+            MagicMock(message=MagicMock(content='{"recommendations": [{"menu_id": "%s", "reason": "x"}]}' % menu_id))
+        ]
+        with patch.object(R, "get_llm_client", return_value=fake_client):
+            R._call_recommendation_llm_sync("おすすめは?", documents, 3, "ja")
+        content = fake_client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("reason은 반드시 일본어로", content)

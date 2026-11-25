@@ -37,6 +37,7 @@ class MenuRecommendationRequest(BaseModel):
     """메뉴 추천 요청"""
     query: str = Field(..., min_length=1, max_length=500, description="고객 요청 문장")
     top_k: int = Field(default=3, ge=1, le=5, description="추천 후보 개수")
+    language: str = Field(default="ko", description="추천 이유를 쓸 언어 'ko' | 'ja' | 'es' | 'th'")
 
 
 class MenuRecommendationItem(BaseModel):

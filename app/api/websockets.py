@@ -69,7 +69,7 @@ def _validate_raw_pcm_audio(audio_bytes: bytes) -> str | None:
 
 async def _send_recommendation(ws: WebSocket, recognized_text: str, language: str, chain_start: float) -> None:
     logger.info("[WS] Stage 3: 메뉴 추천 요청으로 처리")
-    result = await recommend_for_voice(recognized_text)
+    result = await recommend_for_voice(recognized_text, language=language)
     message = recommendation_message(recognized_text, language, result)
     await ws.send_json(message)
     logger.info(

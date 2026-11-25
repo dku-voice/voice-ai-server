@@ -106,7 +106,7 @@ RECOMMENDATION_FORMAT_INSTRUCTION = """
 아래 형식의 JSON 객체만 출력하세요.
 {
   "recommendations": [
-    {"menu_id": "burger_01", "reason": "문서의 어떤 정보(특징, 영양, 가격, 설명)를 근거로 골랐는지 한국어 한 문장"}
+    {"menu_id": "burger_01", "reason": "문서의 어떤 정보(특징, 영양, 가격, 설명)를 근거로 골랐는지 지정한 언어로 한 문장"}
   ]
 }
 """
@@ -451,10 +451,19 @@ def _format_documents_for_prompt(documents: Sequence[MenuDocument]) -> str:
     return "\n\n".join(document.page_content for document in documents)
 
 
+REASON_LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
+
+
+def _reason_language_instruction(language: str) -> str:
+    name = REASON_LANGUAGE_NAMES.get(language, REASON_LANGUAGE_NAMES["ko"])
+    return f"reason은 반드시 {name}로 쓰세요. 메뉴 이름은 문서에 있는 이름을 그대로 쓰세요.\n"
+
+
 def _call_recommendation_llm_sync(
     query: str,
     documents: Sequence[MenuDocument],
     top_k: int,
+    language: str = "ko",
 ) -> tuple[str, list[MenuRecommendationItem]]:
     # 주문과 공유하는 클라이언트의 재시도 설정(LLM_MAX_RETRIES)은 이 호출에만 덮어쓴다.
     client = get_llm_client().with_options(max_retries=RECOMMENDATION_LLM_MAX_RETRIES)
@@ -468,6 +477,7 @@ def _call_recommendation_llm_sync(
                     f"고객 요청: \"{query}\"\n\n"
                     f"검색된 메뉴 문서:\n{_format_documents_for_prompt(documents)}\n\n"
                     f"최대 {top_k}개까지만 추천하세요.\n"
+                    f"{_reason_language_instruction(language)}"
                     f"{RECOMMENDATION_FORMAT_INSTRUCTION}"
                 ),
             },
@@ -614,7 +624,7 @@ def _fallback_recommendations(
     return recommendations
 
 
-async def recommend_menus(query: str, top_k: int = 3) -> dict:
+async def recommend_menus(query: str, top_k: int = 3, language: str = "ko") -> dict:
     """
     메뉴 추천 RAG 기초 파이프라인.
 
@@ -649,6 +659,7 @@ async def recommend_menus(query: str, top_k: int = 3) -> dict:
             query,
             documents,
             top_k,
+            language,
         )
         return {
             "status": phase,
