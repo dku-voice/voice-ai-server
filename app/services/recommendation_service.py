@@ -15,7 +15,7 @@ from typing import Any, Sequence
 
 from httpx import Timeout
 
-from app.config import LLM_MODEL, RECOMMENDATION_LLM_TIMEOUT_SECONDS
+from app.config import LLM_MODEL, RECOMMENDATION_LLM_MAX_RETRIES, RECOMMENDATION_LLM_TIMEOUT_SECONDS
 from app.schemas import MenuRecommendationItem
 # MENU_CATALOG 등은 백엔드 동기화 때 llm_service 쪽에서 통째로 교체된다.
 # 이름만 import하면 옛 객체를 계속 보게 되므로, 모듈을 통해 호출 시점에 읽는다.
@@ -456,7 +456,8 @@ def _call_recommendation_llm_sync(
     documents: Sequence[MenuDocument],
     top_k: int,
 ) -> tuple[str, list[MenuRecommendationItem]]:
-    client = get_llm_client()
+    # 주문과 공유하는 클라이언트의 재시도 설정(LLM_MAX_RETRIES)은 이 호출에만 덮어쓴다.
+    client = get_llm_client().with_options(max_retries=RECOMMENDATION_LLM_MAX_RETRIES)
     response = client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
@@ -572,6 +573,12 @@ def _select_fallback_documents(
             pool = sorted(priced, key=lambda d: d.metadata["price"])  # 같은 가격이면 이전 순서 유지
             cheap = True
 
+    # 태그/영양/가격 조건이 없는 막연한 질문("추천해줘", 일본어 질문 등)은 대표 메뉴를 먼저 보여준다.
+    if not (matched_tags or nutrition_rule or cheap):
+        representative = [d for d in pool if "대표 메뉴" in d.metadata.get("features", ())]
+        others = [d for d in pool if d not in representative]
+        pool = representative + others
+
     return pool, matched_tags, cheap, nutrition_rule
 
 
@@ -595,6 +602,8 @@ def _fallback_recommendations(
             reason = f"{label} 수치가 {'높은' if descending else '낮은'} 순으로 골랐습니다. ({_format_number(value)}{unit})"
         elif document_tags:
             reason = f"'{document_tags[0]}' 특징이 있는 메뉴입니다."
+        elif not (matched_tags or cheap) and "대표 메뉴" in document.metadata.get("features", ()):
+            reason = "대표 메뉴입니다."
         recommendations.append(
             MenuRecommendationItem(
                 menu_id=menu_id,
