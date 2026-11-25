@@ -132,6 +132,7 @@ MENU_CATALOG = {
 
 MENU_FOREIGN_NAMES: dict[str, tuple[str, ...]] = {}
 MENU_OPTIONS_BY_ID: dict[str, tuple[str, ...]] = {}
+OPTION_NAMES_BY_LANGUAGE: dict[str, dict[str, str]] = {}
 MENU_NAMES_BY_LANGUAGE: dict[str, tuple[str, ...]] = {}
 MENU_SOURCE = "static"
 MENU_META_BY_ID: dict[str, dict[str, Any]] = {}
@@ -241,9 +242,10 @@ def apply_menu_catalog(
     names_by_language: dict[str, tuple[str, ...]] | None = None,
     options_by_id: dict[str, tuple[str, ...]] | None = None,
     meta_by_id: dict[str, dict[str, Any]] | None = None,
+    option_names_by_language: dict[str, dict[str, str]] | None = None,
 ) -> None:
     global MENU_CATALOG, MENU_ALIASES, MENU_FOREIGN_NAMES, MENU_NAMES_BY_LANGUAGE, MENU_SOURCE, MENU_OPTIONS_BY_ID
-    global MENU_META_BY_ID, MENU_VERSION
+    global MENU_META_BY_ID, MENU_VERSION, OPTION_NAMES_BY_LANGUAGE
     if not catalog:
         raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
     with _menu_lock:
@@ -254,6 +256,7 @@ def apply_menu_catalog(
         MENU_OPTIONS_BY_ID = dict(options_by_id or {})
         MENU_SOURCE = source
         MENU_META_BY_ID = dict(meta_by_id or {})
+        OPTION_NAMES_BY_LANGUAGE = {lang: dict(names) for lang, names in (option_names_by_language or {}).items()}
         MENU_VERSION += 1
         version = MENU_VERSION
     logger.info("[MENU] 메뉴 %d종 적용 (source=%s, version=%d)", len(catalog), source, version)
@@ -347,9 +350,12 @@ UNIT_PATTERN = "|".join(re.escape(unit) for unit in QUANTITY_UNITS)
 QUANTITY_PATTERN = re.compile(rf"(?P<number>{NUMBER_PATTERN})(?P<unit>{UNIT_PATTERN})?")
 
 
+ACCENT_FOLD = str.maketrans("áéíóúüñàèìòùâêîôû", "aeiouunaeiouaeiou")
+
+
 def _normalize_order_text(text: str) -> str:
     """키워드 fallback에서 비교하기 쉽도록 공백과 대소문자를 정리한다."""
-    return re.sub(r"\s+", "", text).lower()
+    return re.sub(r"\s+", "", text).lower().translate(ACCENT_FOLD)
 
 
 def _quantity_token_to_int(token: str) -> int | None:
@@ -489,11 +495,177 @@ def _quantity_by_menu_id(items: List[OrderItem]) -> dict[str, int]:
     return quantities
 
 
-def _fallback_keyword_parse(text: str, *, log_result: bool = True) -> List[OrderItem]:
+FOREIGN_FALLBACK_LANGUAGES = ("ja", "es", "th")
+JA_QUANTITY_WORDS = {
+    "ひとつ": 1, "ふたつ": 2, "みっつ": 3, "よっつ": 4, "いつつ": 5,
+    "むっつ": 6, "ななつ": 7, "やっつ": 8, "ここのつ": 9, "とお": 10,
+}
+JA_KANJI_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+JA_QUANTITY_PATTERN = re.compile(
+    "(" + "|".join(JA_QUANTITY_WORDS) + ")|([0-9]+|[一二三四五六七八九十])(?:つ|個|こ|本|杯|枚|人前|点)"
+)
+ES_QUANTITY_WORDS = {
+    "un": 1, "una": 1, "uno": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+    "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+}
+ES_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(ES_QUANTITY_WORDS) + r"|[0-9]+)\b")
+TH_QUANTITY_WORDS = {
+    "หนึ่ง": 1, "สอง": 2, "สาม": 3, "สี่": 4, "ห้า": 5,
+    "หก": 6, "เจ็ด": 7, "แปด": 8, "เก้า": 9, "สิบ": 10,
+}
+TH_QUANTITY_PATTERN = re.compile("(" + "|".join(TH_QUANTITY_WORDS) + "|[0-9]+)")
+FOREIGN_QUANTITY_WINDOW = 12
+FOREIGN_OPTION_SYNONYMS: dict[str, dict[str, str]] = {
+    "ja": {
+        "玉ねぎなし": "양파 제거",
+        "オニオン抜き": "양파 제거",
+        "トマトなし": "토마토 제거",
+        "チーズ多め": "치즈 추가",
+    },
+    "es": {
+        "queso extra": "치즈 추가",
+        "con queso extra": "치즈 추가",
+        "extra queso": "치즈 추가",
+        "extra de tocino": "베이컨 추가",
+        "tocino extra": "베이컨 추가",
+        "poca salsa": "소스 적게",
+    },
+    "th": {
+        "ไม่ใส่หอม": "양파 제거",
+        "ไม่เอาหอม": "양파 제거",
+        "ไม่เอามะเขือเทศ": "토마토 제거",
+        "ชีสเพิ่ม": "치즈 추가",
+    },
+}
+
+
+def _normalize_with_map(text: str) -> tuple[str, list[int]]:
+    chars: list[str] = []
+    index_map: list[int] = []
+    for index, char in enumerate(text):
+        if char.isspace():
+            continue
+        folded = char.lower().translate(ACCENT_FOLD)
+        for piece in folded:
+            chars.append(piece)
+            index_map.append(index)
+    return "".join(chars), index_map
+
+
+def _clamp_quantity(value: int) -> int | None:
+    if 1 <= value <= MAX_ORDER_QUANTITY:
+        return value
+    return None
+
+
+def _ja_quantity(segment: str) -> int | None:
+    match = JA_QUANTITY_PATTERN.search(segment)
+    if not match:
+        return None
+    if match.group(1):
+        return _clamp_quantity(JA_QUANTITY_WORDS[match.group(1)])
+    token = match.group(2)
+    value = int(token) if token.isdigit() else JA_KANJI_DIGITS[token]
+    return _clamp_quantity(value)
+
+
+def _es_quantity(segment: str) -> int | None:
+    matches = list(ES_QUANTITY_PATTERN.finditer(segment.lower().translate(ACCENT_FOLD)))
+    if not matches:
+        return None
+    token = matches[-1].group(1)
+    value = int(token) if token.isdigit() else ES_QUANTITY_WORDS[token]
+    return _clamp_quantity(value)
+
+
+def _th_quantity(segment: str) -> int | None:
+    match = TH_QUANTITY_PATTERN.search(segment)
+    if not match:
+        return None
+    token = match.group(1)
+    value = int(token) if token.isdigit() else TH_QUANTITY_WORDS[token]
+    return _clamp_quantity(value)
+
+
+def _foreign_quantity(
+    text: str,
+    normalized_text: str,
+    index_map: list[int],
+    menu_matches: list[tuple[int, int, str]],
+    position: int,
+    language: str,
+) -> int:
+    start_idx, end_idx, _ = menu_matches[position]
+    if language == "es":
+        previous_end = menu_matches[position - 1][1] if position > 0 else 0
+        if start_idx <= previous_end:
+            return 1
+        original_start = index_map[previous_end] if previous_end < len(index_map) else len(text)
+        original_end = index_map[start_idx]
+        segment = text[original_start:original_end][-30:]
+        return _es_quantity(segment) or 1
+    next_start = menu_matches[position + 1][0] if position + 1 < len(menu_matches) else len(normalized_text)
+    segment = normalized_text[end_idx:min(next_start, end_idx + FOREIGN_QUANTITY_WINDOW)]
+    if language == "ja":
+        return _ja_quantity(segment) or 1
+    return _th_quantity(segment) or 1
+
+
+def _foreign_option_names(language: str) -> dict[str, str]:
+    names = dict(FOREIGN_OPTION_SYNONYMS.get(language, {}))
+    names.update(OPTION_NAMES_BY_LANGUAGE.get(language, {}))
+    return {_normalize_order_text(name): korean for name, korean in names.items() if name and korean}
+
+
+def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tuple[int, int, str]]:
+    candidates = []
+    for name, korean in _foreign_option_names(language).items():
+        start_idx = normalized_text.find(name)
+        while start_idx != -1:
+            candidates.append((start_idx, start_idx + len(name), korean))
+            start_idx = normalized_text.find(name, start_idx + 1)
+    candidates.sort(key=lambda c: (c[0], -(c[1] - c[0])))
+    matches: list[tuple[int, int, str]] = []
+    for candidate in candidates:
+        if any(candidate[0] < end and start < candidate[1] for start, end, _ in matches):
+            continue
+        matches.append(candidate)
+    return matches
+
+
+def _foreign_keyword_parse(text: str, language: str) -> List[OrderItem]:
+    normalized_text, index_map = _normalize_with_map(text)
+    menu_matches = _find_menu_matches(normalized_text)
+    option_matches = [
+        option for option in _find_foreign_option_matches(normalized_text, language)
+        if not any(option[0] < end and start < option[1] for start, end, _ in menu_matches)
+    ]
+    options_per_menu: list[list[str]] = [[] for _ in menu_matches]
+    for option_start, _, option_name in option_matches:
+        preceding = [i for i, match in enumerate(menu_matches) if match[1] <= option_start]
+        following = [i for i, match in enumerate(menu_matches) if match[0] >= option_start]
+        target = preceding[-1] if preceding else (following[0] if following else None)
+        if target is not None and option_name not in options_per_menu[target]:
+            options_per_menu[target].append(option_name)
+
+    items: List[OrderItem] = []
+    for position, ((_, _, menu_id), options) in enumerate(zip(menu_matches, options_per_menu)):
+        quantity = _foreign_quantity(text, normalized_text, index_map, menu_matches, position, language)
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
+    return _merge_duplicate_items(items)
+
+
+def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str = "ko") -> List[OrderItem]:
     """
     LLM이 실패했을 때 마지막으로 쓰는 키워드 매칭.
     메뉴명과 가까운 수량만 찾아서 최소한의 주문 결과를 만든다.
     """
+    if language in FOREIGN_FALLBACK_LANGUAGES:
+        items = _foreign_keyword_parse(text, language)
+        if log_result:
+            logger.info("[LLM-Fallback] %s 키워드 매칭 결과: %s건", language, len(items))
+        return items
+
     normalized_text = _normalize_order_text(text)
     items: List[OrderItem] = []
 
@@ -695,20 +867,20 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
 
     except LLMConfigurationError as e:
         logger.warning("[LLM] 설정 오류, Phase 3 fallback 진입: %s", e)
-        return ("fallback", _fallback_keyword_parse(text))
+        return ("fallback", _fallback_keyword_parse(text, language=language))
 
     except (json.JSONDecodeError, LLMResponseFormatError) as e:
         logger.warning("[LLM] Phase 1 JSON 형식 오류, Phase 2로 진행: %s", e)
 
     except LLMResponseValidationError as e:
         logger.warning("[LLM] Phase 1 검증 실패, Phase 3 fallback 진입: %s", e)
-        return ("fallback", _fallback_keyword_parse(text))
+        return ("fallback", _fallback_keyword_parse(text, language=language))
 
     except Exception as e:
         logger.error("[LLM] Phase 1 실패: %s", e)
         # API 자체가 터진 거면 Phase 2도 의미 없으니 바로 Phase 3
         logger.info("[LLM] API 에러, Phase 3 fallback으로 직행")
-        return ("fallback", _fallback_keyword_parse(text))
+        return ("fallback", _fallback_keyword_parse(text, language=language))
 
     # ===== Phase 2: JSON 형식으로 다시 요청 =====
     logger.info("[LLM] Phase 2: JSON 강제 재시도")
@@ -744,7 +916,7 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
     # ===== Phase 3: 키워드 fallback =====
     # 여기까지 왔으면 LLM 결과를 믿기 어려우므로 단순 매칭으로 내려간다.
     logger.info("[LLM] Phase 3: v1.0 레거시 fallback 실행")
-    return ("fallback", _fallback_keyword_parse(text))
+    return ("fallback", _fallback_keyword_parse(text, language=language))
 
 
 async def extract_order(text: str, language: str = "ko") -> dict:
@@ -789,7 +961,7 @@ async def extract_order(text: str, language: str = "ko") -> dict:
 
         # 그래도 키워드 fallback은 한 번 더 시도한다.
         try:
-            fallback_items = _fallback_keyword_parse(text)
+            fallback_items = _fallback_keyword_parse(text, language=language)
             return {
                 "status": "fallback",
                 "items": fallback_items,

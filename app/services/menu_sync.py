@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 import threading
 import urllib.request
@@ -16,6 +17,30 @@ logger = logging.getLogger(__name__)
 BRAND_PREFIXES = ("리아",)
 FOREIGN_NAME_FIELDS = ("nameEn", "nameJa", "nameEs", "nameTh")
 LANGUAGE_NAME_FIELDS = {"ko": "nameKo", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
+FOREIGN_OPTION_FIELDS = {"ja": "nameJa", "es": "nameEs", "th": "nameTh"}
+FOREIGN_BRAND_PATTERN = re.compile(r"^(?:リア|ริอา|Ria)\s*|\s*\bRia$")
+
+
+def _foreign_aliases(names: tuple[str, ...]) -> tuple[str, ...]:
+    result = list(names)
+    for name in names:
+        stripped = FOREIGN_BRAND_PATTERN.sub("", name).strip()
+        variants = [name]
+        if len(stripped) >= 2 and stripped != name:
+            variants.append(stripped)
+        for variant in variants:
+            result.append(variant)
+            plural = _spanish_plural(variant)
+            if plural:
+                result.append(plural)
+    return tuple(dict.fromkeys(result))
+
+
+def _spanish_plural(name: str) -> str | None:
+    first, _, rest = name.partition(" ")
+    if not rest or not first.isascii() or not first.isalpha() or first[-1].lower() not in "aeiou":
+        return None
+    return f"{first}s {rest}"
 ORDERABLE_STATUSES = {"ACTIVE", "SOLD_OUT"}
 # 추천 문서에 넣을 영양 정보 항목 (백엔드 nutrient 객체 키 -> 문서에 쓰는 이름). 순서대로 출력된다.
 NUTRIENT_LABELS = {
@@ -95,7 +120,7 @@ def build_menu_catalog(payload: dict) -> tuple[dict, dict, dict]:
         names = tuple(dict.fromkeys(n for n in (_clean(menu.get(f)) for f in FOREIGN_NAME_FIELDS) if n))
         catalog[key] = name_ko
         foreign[key] = names
-        aliases[key] = tuple(dict.fromkeys(_korean_aliases(name_ko) + names))
+        aliases[key] = tuple(dict.fromkeys(_korean_aliases(name_ko) + _foreign_aliases(names)))
 
     if not catalog:
         raise ValueError("주문 가능한 메뉴가 없습니다.")
@@ -193,6 +218,26 @@ def build_menu_meta(payload: dict, catalog: dict[str, str]) -> dict[str, dict]:
     return result
 
 
+def build_option_names_by_language(payload: dict, catalog: dict[str, str]) -> dict[str, dict[str, str]]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    result: dict[str, dict[str, str]] = {lang: {} for lang in FOREIGN_OPTION_FIELDS}
+    for menu in payload.get("menus", []) if isinstance(payload, dict) else []:
+        if not isinstance(menu, dict) or str(menu.get("menuId")) not in catalog:
+            continue
+        for option in menu.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            name_ko = _clean(option.get("nameKo"))
+            if not name_ko:
+                continue
+            for lang, field in FOREIGN_OPTION_FIELDS.items():
+                name = _clean(option.get(field))
+                if name:
+                    result[lang][name] = name_ko
+    return {lang: names for lang, names in result.items() if names}
+
+
 def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
     payload = fetch_menu_payload(url)
     catalog, aliases, foreign = build_menu_catalog(payload)
@@ -204,6 +249,7 @@ def sync_menus_once(url: str = MENU_SYNC_URL) -> dict:
         names_by_language=build_names_by_language(payload, catalog),
         options_by_id=build_options_by_id(payload, catalog),
         meta_by_id=build_menu_meta(payload, catalog),
+        option_names_by_language=build_option_names_by_language(payload, catalog),
     )
     return llm_service.menu_catalog_summary()
 
