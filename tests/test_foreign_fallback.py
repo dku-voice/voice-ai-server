@@ -108,6 +108,29 @@ class ForeignFallbackTest(unittest.TestCase):
     def test_option_not_on_menu_is_dropped(self):
         self.assertEqual(self.parse("コーラ、チーズ追加", "ja"), [("14", 1, [])])
 
+    def test_japanese_hiragana_and_misheard_names(self):
+        self.assertEqual(self.parse("てりぼうが、おひとつ、たまねき、ぬきで。", "ja"), [("1", 1, ["양파 제거"])])
+        self.assertEqual(self.parse("こーらをふたつください", "ja"), [("14", 2, [])])
+        self.assertEqual(self.parse("ぜろしゅがーこーら", "ja"), [("15", 1, [])])
+
+    def test_japanese_misheard_long_order_keeps_every_menu(self):
+        self.assertEqual(
+            self.parse("テリバーガーをタッツタマネギに抜きて それぞれチーズスティックを 土地と コラウミッツ ください", "ja"),
+            [("1", 1, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+        self.assertEqual(
+            self.parse("テリバがオフタチタマネギを抜きで、それとチーズスティックを一つどこらを見つくださり。", "ja"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 1, [])],
+        )
+        self.assertEqual(
+            self.parse("テリバーガーをふたつ、玉ねぎ抜きで、それとチーズスティックをひとつとコーラをみっつください", "ja"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+
+    def test_japanese_small_talk_adds_nothing(self):
+        self.assertEqual(self.parse("ありがとう", "ja"), [])
+        self.assertEqual(self.parse("こんにちは", "ja"), [])
+
     def test_korean_path_unchanged(self):
         self.assertEqual(self.parse("데리버거 두 개 치즈 추가", "ko"), [("1", 2, ["치즈 추가"])])
 
