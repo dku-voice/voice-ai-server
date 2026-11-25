@@ -13,7 +13,9 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from app.config import LLM_MODEL
+from httpx import Timeout
+
+from app.config import LLM_MODEL, RECOMMENDATION_LLM_TIMEOUT_SECONDS
 from app.schemas import MenuRecommendationItem
 # MENU_CATALOG 등은 백엔드 동기화 때 llm_service 쪽에서 통째로 교체된다.
 # 이름만 import하면 옛 객체를 계속 보게 되므로, 모듈을 통해 호출 시점에 읽는다.
@@ -104,7 +106,7 @@ RECOMMENDATION_FORMAT_INSTRUCTION = """
 아래 형식의 JSON 객체만 출력하세요.
 {
   "recommendations": [
-    {"menu_id": "burger_01", "reason": "고객 요청과 맞는 이유"}
+    {"menu_id": "burger_01", "reason": "문서의 어떤 정보(특징, 영양, 가격, 설명)를 근거로 골랐는지 한국어 한 문장"}
   ]
 }
 """
@@ -162,6 +164,14 @@ def _format_nutrition(nutrition: dict[str, Any]) -> str:
     )
 
 
+def _parse_features(description: str) -> tuple[str, ...]:
+    """설명 끝의 "특징: 산뜻함, 아이 추천" 줄에서 태그 목록을 뽑는다."""
+    if not description or "특징:" not in description:
+        return ()
+    tail = description.rsplit("특징:", 1)[1]
+    return tuple(dict.fromkeys(part.strip() for part in tail.split(",") if part.strip()))
+
+
 def _live_document(menu_id: str, name: str) -> MenuDocument:
     """백엔드에서 동기화된 메뉴 하나를 추천 문서로 만든다."""
     meta = llm_service.MENU_META_BY_ID.get(menu_id, {})
@@ -172,6 +182,7 @@ def _live_document(menu_id: str, name: str) -> MenuDocument:
     allergens = tuple(meta.get("allergens", ()))
     nutrition = meta.get("nutrition", {})
     price = meta.get("price")
+    features = _parse_features(description)
 
     # 외국어 이름도 검색어에 넣어서 일본어/스페인어/태국어 질문이 메뉴 이름으로 매칭되게 한다.
     search_terms = tuple(dict.fromkeys(term for term in (name, *aliases, *foreign_names, category) if term))
@@ -201,6 +212,9 @@ def _live_document(menu_id: str, name: str) -> MenuDocument:
             "name": name,
             "category": category,
             "tags": [],
+            "features": features,
+            "price": price,
+            "nutrition": dict(nutrition),
             "search_terms": list(search_terms),
             "match_text": match_text,
         },
@@ -369,6 +383,9 @@ def _document_by_menu_id(documents: Sequence[MenuDocument]) -> dict[str, MenuDoc
     return {str(document.metadata["menu_id"]): document for document in documents}
 
 
+MAX_REASON_LENGTH = 120
+
+
 def _coerce_recommendation(
     entry: Any,
     documents_by_menu_id: dict[str, MenuDocument],
@@ -383,10 +400,16 @@ def _coerce_recommendation(
 
     document = documents_by_menu_id[menu_id]
 
+    # LLM이 근거를 적어 줬으면 그대로 쓰고(길이만 제한), 비어 있을 때만 서버 문구를 쓴다.
+    reason = entry.get("reason")
+    reason = " ".join(reason.split())[:MAX_REASON_LENGTH] if isinstance(reason, str) else ""
+    if not reason:
+        reason = _fallback_reason(query, document)
+
     return MenuRecommendationItem(
         menu_id=menu_id,
         name=llm_service.MENU_CATALOG.get(menu_id) or document.metadata["name"],
-        reason=_fallback_reason(query, document),
+        reason=reason,
     )
 
 
@@ -449,6 +472,8 @@ def _call_recommendation_llm_sync(
             },
         ],
         temperature=0.2,
+        # 주문용 클라이언트 기본값(6초)보다 길게 쓴다. 이 호출에만 적용된다.
+        timeout=Timeout(RECOMMENDATION_LLM_TIMEOUT_SECONDS, connect=5.0),
         **completion_options(),
     )
 
@@ -468,19 +493,113 @@ def _fallback_reason(query: str, document: MenuDocument) -> str:
     return "현재 메뉴 문서에서 추천 후보로 선택했습니다."
 
 
+# LLM이 실패했을 때 질문 속 말을 보고 태그/가격/카테고리로 직접 고르는 규칙이다.
+FALLBACK_FEATURE_TERMS: tuple[tuple[str, re.Pattern], ...] = (
+    ("매콤함", re.compile(r"매운|매콤|맵[지다고]|맵게|맵지")),
+    ("산뜻함", re.compile(r"산뜻|상큼")),
+    ("달콤함", re.compile(r"달달|달콤|달아")),
+    ("바삭함", re.compile(r"바삭")),
+    ("부드러움", re.compile(r"부드러")),
+    ("고소함", re.compile(r"고소")),
+    ("채소 많음", re.compile(r"채소|야채")),
+    ("간편함", re.compile(r"들고\s*다니|간편|간단|가볍게\s*먹")),
+    ("아이 추천", re.compile(r"아이(?!스)|어린이|아기|애기")),
+    ("1인 추천", re.compile(r"혼자|1인")),
+    ("대표 메뉴", re.compile(r"처음|대표|인기")),
+)
+# 영양 수치 기준 질문: (표현, 영양 항목, 높은 순이면 True / 낮은 순이면 False)
+FALLBACK_NUTRITION_RULES: tuple[tuple[re.Pattern, str, bool], ...] = (
+    (re.compile(r"기름진|느끼"), "지방", True),
+    (re.compile(r"담백|가벼운"), "지방", False),
+    (re.compile(r"칼로리\s*(?:가\s*)?낮|저칼로리|다이어트"), "칼로리", False),
+    (re.compile(r"짭짤|짠\s*(?:거|것|맛|음식|메뉴)|짜게"), "나트륨", True),
+    (re.compile(r"단백질|고단백"), "단백질", True),
+)
+FALLBACK_PRICE_PATTERN = re.compile(r"싼|싸게|싸고|저렴|가성비|값싼|가격\s*낮")
+FALLBACK_CATEGORY_TERMS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
+    (re.compile(r"버거|햄버거"), ("버거", "main")),
+    (re.compile(r"사이드|곁들"), ("사이드", "side")),
+    (re.compile(r"음료|마실|마시"), ("음료", "drink")),
+)
+
+
+def _select_fallback_documents(
+    query: str,
+    documents: Sequence[MenuDocument],
+) -> tuple[list[MenuDocument], list[str], bool, tuple[str, bool] | None]:
+    """
+    질문에서 카테고리 → 태그 → 영양 수치 → 가격 순서로 좁히거나 정렬한다.
+    좁힌 결과가 비면 그 단계는 건너뛴다.
+    반환값: (문서 목록, 맞은 태그, 가격순 여부, (영양 항목, 높은 순 여부) 또는 None)
+    """
+    pool = list(documents)
+
+    category_chosen = False
+    for pattern, categories in FALLBACK_CATEGORY_TERMS:
+        if pattern.search(query):
+            narrowed = [d for d in pool if d.metadata.get("category") in categories]
+            if narrowed:
+                pool = narrowed
+                category_chosen = True
+            break
+
+    wanted = [tag for tag, pattern in FALLBACK_FEATURE_TERMS if pattern.search(query)]
+    matched_tags: list[str] = []
+    if wanted:
+        narrowed = [d for d in pool if any(tag in d.metadata.get("features", ()) for tag in wanted)]
+        if narrowed:
+            pool = narrowed
+            matched_tags = wanted
+
+    nutrition_rule: tuple[str, bool] | None = None
+    for pattern, label, descending in FALLBACK_NUTRITION_RULES:
+        if not pattern.search(query):
+            continue
+        candidates = pool
+        if not category_chosen:
+            # 카테고리를 말하지 않았다면 음료는 빼고 본다. (음료는 지방/나트륨이 0에 가까워 낮은 순에서 항상 앞에 온다.)
+            candidates = [d for d in pool if d.metadata.get("category") not in ("음료", "drink")] or pool
+        with_value = [d for d in candidates if isinstance(d.metadata.get("nutrition", {}).get(label), (int, float))]
+        if with_value:
+            pool = sorted(with_value, key=lambda d: d.metadata["nutrition"][label], reverse=descending)
+            nutrition_rule = (label, descending)
+        break
+
+    cheap = False
+    if FALLBACK_PRICE_PATTERN.search(query):
+        priced = [d for d in pool if d.metadata.get("price") is not None]
+        if priced:
+            pool = sorted(priced, key=lambda d: d.metadata["price"])  # 같은 가격이면 이전 순서 유지
+            cheap = True
+
+    return pool, matched_tags, cheap, nutrition_rule
+
+
 def _fallback_recommendations(
     query: str,
     documents: Sequence[MenuDocument],
     top_k: int,
 ) -> list[MenuRecommendationItem]:
+    selected, matched_tags, cheap, nutrition_rule = _select_fallback_documents(query, documents)
     recommendations: list[MenuRecommendationItem] = []
-    for document in documents[:top_k]:
+    for document in selected[:top_k]:
         menu_id = document.metadata["menu_id"]
+        reason = _fallback_reason(query, document)
+        document_tags = [tag for tag in matched_tags if tag in document.metadata.get("features", ())]
+        if cheap and document.metadata.get("price") is not None:
+            reason = f"가격이 낮은 순으로 골랐습니다. ({document.metadata['price']:,}원)"
+        elif nutrition_rule is not None:
+            label, descending = nutrition_rule
+            value = document.metadata["nutrition"][label]
+            unit = NUTRITION_UNITS.get(label, "")
+            reason = f"{label} 수치가 {'높은' if descending else '낮은'} 순으로 골랐습니다. ({_format_number(value)}{unit})"
+        elif document_tags:
+            reason = f"'{document_tags[0]}' 특징이 있는 메뉴입니다."
         recommendations.append(
             MenuRecommendationItem(
                 menu_id=menu_id,
-                name=document.metadata["name"],
-                reason=_fallback_reason(query, document),
+                name=llm_service.MENU_CATALOG.get(menu_id) or document.metadata["name"],
+                reason=reason,
             )
         )
     return recommendations
