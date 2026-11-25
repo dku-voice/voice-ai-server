@@ -235,6 +235,24 @@ options에는 아래 이름만 그대로 넣고, 요청이 없으면 빈 배열�
 """
 
 
+EXTRA_FOREIGN_ALIASES = {
+    "데리버거": ("teri burger", "teri burgers", "teriburger", "hamburguesa teriyaki", "hamburguesas teriyaki", "teri"),
+    "감자튀김": ("papas fritas", "papas", "patatas"),
+    "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos"),
+    "치킨너겟": ("nuggets", "nuggets de pollo"),
+    "콜라": ("coca cola", "coca-cola", "colas"),
+}
+
+
+def _with_extra_aliases(catalog: dict[str, str], aliases: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    merged = dict(aliases)
+    for menu_id, name in catalog.items():
+        extra = EXTRA_FOREIGN_ALIASES.get(name)
+        if extra:
+            merged[menu_id] = tuple(dict.fromkeys(tuple(merged.get(menu_id, ())) + extra))
+    return merged
+
+
 def apply_menu_catalog(
     catalog: dict[str, str],
     aliases: dict[str, tuple[str, ...]],
@@ -251,7 +269,7 @@ def apply_menu_catalog(
         raise ValueError("빈 메뉴 목록은 적용할 수 없습니다.")
     with _menu_lock:
         MENU_CATALOG = dict(catalog)
-        MENU_ALIASES = dict(aliases)
+        MENU_ALIASES = _with_extra_aliases(catalog, aliases)
         MENU_FOREIGN_NAMES = dict(foreign_names)
         MENU_NAMES_BY_LANGUAGE = dict(names_by_language or {})
         MENU_OPTIONS_BY_ID = dict(options_by_id or {})
@@ -539,6 +557,8 @@ FOREIGN_OPTION_SYNONYMS: dict[str, dict[str, str]] = {
         "extra de tocino": "베이컨 추가",
         "tocino extra": "베이컨 추가",
         "poca salsa": "소스 적게",
+        "en cebolla": "양파 제거",
+        "sin tomate": "토마토 제거",
     },
     "th": {
         "ไม่ใส่หอม": "양파 제거",
