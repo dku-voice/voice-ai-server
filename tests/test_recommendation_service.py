@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from app.api.recommendations import router
 from app.schemas import MenuRecommendationItem
 from app.services.llm_service import LLMConfigurationError, LLMResponseValidationError
 from app.services.recommendation_service import (
+    _call_recommendation_llm_sync,
     _fallback_recommendations,
     _parse_recommendation_response,
     recommend_menus,
@@ -210,12 +212,69 @@ class FallbackSelectionTest(unittest.TestCase):
         self.assertIn("지방", item.reason)
         self.assertIn("16g", item.reason)
 
+    def test_fallback_puts_representative_menus_first_for_vague_query(self):
+        docs = [
+            _live_like_document("1", "데리버거", "버거", ["달콤함"], 2800),
+            _live_like_document("2", "리아 새우버거", "버거", ["산뜻함", "대표 메뉴"], 4200),
+            _live_like_document("3", "리아 불고기버거", "버거", ["채소 많음", "대표 메뉴"], 3800),
+            _live_like_document("9", "양념감자", "사이드", ["바삭함"], 2700),
+        ]
+
+        for query in ("추천해줘", "おすすめを教えてください", "Quiero algo rico"):
+            ids = [item.menu_id for item in _fallback_recommendations(query, docs, 3)]
+            self.assertEqual(ids, ["2", "3", "1"], query)
+
+        first = _fallback_recommendations("추천해줘", docs, 1)[0]
+        self.assertIn("대표", first.reason)
+
+        # 카테고리만 말한 경우에도 그 안에서 대표 메뉴가 먼저 온다.
+        ids = [item.menu_id for item in _fallback_recommendations("버거 추천해줘", docs, 3)]
+        self.assertEqual(ids, ["2", "3", "1"])
+
+    def test_fallback_specific_query_does_not_prefer_representative(self):
+        docs = [
+            _live_like_document("1", "데리버거", "버거", ["달콤함"], 2800),
+            _live_like_document("2", "리아 새우버거", "버거", ["산뜻함", "대표 메뉴"], 4200),
+        ]
+
+        ids = [item.menu_id for item in _fallback_recommendations("달달한 거", docs, 3)]
+
+        self.assertEqual(ids, ["1"])
+
     def test_fallback_reason_mentions_tag_or_price(self):
         tag_item = _fallback_recommendations("매운 거", self.docs, 1)[0]
         price_item = _fallback_recommendations("싼 거", self.docs, 1)[0]
 
         self.assertIn("매콤함", tag_item.reason)
         self.assertIn("2,100원", price_item.reason)
+
+
+class RecommendationLLMCallTest(unittest.TestCase):
+    def test_recommendation_call_uses_own_retries_and_timeout(self):
+        calls = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                calls["create"] = kwargs
+                message = SimpleNamespace(content='{"recommendations": [{"menu_id": "cola_01", "reason": "음료 요청입니다."}]}')
+                return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        class FakeClient:
+            chat = SimpleNamespace(completions=FakeCompletions())
+
+            def with_options(self, **kwargs):
+                calls["with_options"] = kwargs
+                return self
+
+        docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
+        with patch("app.services.recommendation_service.get_llm_client", return_value=FakeClient()):
+            phase, recommendations = _call_recommendation_llm_sync("음료 추천해줘", docs, 1)
+
+        self.assertEqual(phase, "success")
+        self.assertEqual(recommendations[0].menu_id, "cola_01")
+        # 주문과 공유하는 클라이언트의 재시도(1회)가 아니라 추천 전용 설정(기본 0회)을 쓴다.
+        self.assertEqual(calls["with_options"], {"max_retries": 0})
+        self.assertEqual(calls["create"]["timeout"].read, 12.0)
 
 
 class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
