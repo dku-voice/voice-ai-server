@@ -13,6 +13,7 @@ from app.services.recommendation_service import (
     recommend_menus,
     retrieve_menu_documents,
 )
+from app.services.recommendation_service import _create_document
 
 
 class RecommendationServiceTest(unittest.TestCase):
@@ -89,16 +90,33 @@ class RecommendationServiceTest(unittest.TestCase):
         with self.assertRaises(LLMResponseValidationError):
             _parse_recommendation_response(raw, docs, top_k=1)
 
-    def test_parse_recommendation_response_uses_server_side_reason(self):
+    def test_parse_recommendation_response_uses_llm_reason(self):
         docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
-        raw = '{"recommendations": [{"menu_id": "cola_01", "reason": "100원이고 매운맛입니다."}]}'
+        raw = '{"recommendations": [{"menu_id": "cola_01", "reason": "  음료 요청과\\n맞는 메뉴입니다.  "}]}'
 
         recommendations = _parse_recommendation_response(raw, docs, top_k=1, query="음료 추천해줘")
 
         self.assertEqual(recommendations[0].menu_id, "cola_01")
-        self.assertNotIn("100원", recommendations[0].reason)
-        self.assertNotIn("매운맛", recommendations[0].reason)
+        # LLM이 준 근거를 쓰되 공백/줄바꿈은 정리한다.
+        self.assertEqual(recommendations[0].reason, "음료 요청과 맞는 메뉴입니다.")
+
+    def test_parse_recommendation_response_uses_fallback_reason_when_missing(self):
+        docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
+        raw = '{"recommendations": [{"menu_id": "cola_01", "reason": "  "}, {"menu_id": "fries_01"}]}'
+
+        recommendations = _parse_recommendation_response(raw, docs, top_k=2, query="음료 추천해줘")
+
+        self.assertEqual([item.menu_id for item in recommendations], ["cola_01", "fries_01"])
         self.assertIn("음료", recommendations[0].reason)
+        self.assertTrue(recommendations[1].reason)
+
+    def test_parse_recommendation_response_limits_reason_length(self):
+        docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
+        raw = '{"recommendations": [{"menu_id": "cola_01", "reason": "' + ("가" * 500) + '"}]}'
+
+        recommendations = _parse_recommendation_response(raw, docs, top_k=1, query="음료 추천해줘")
+
+        self.assertEqual(len(recommendations[0].reason), 120)
 
     def test_fallback_recommendation_uses_retrieved_documents(self):
         docs = retrieve_menu_documents("음료 추천해줘", top_k=1)
@@ -108,6 +126,60 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertEqual(len(recommendations), 1)
         self.assertEqual(recommendations[0].menu_id, "cola_01")
         self.assertIn("음료", recommendations[0].reason)
+
+
+def _live_like_document(menu_id, name, category, features, price):
+    return _create_document(
+        page_content=f"menu_id: {menu_id}\nname: {name}",
+        metadata={
+            "menu_id": menu_id,
+            "name": name,
+            "category": category,
+            "tags": [],
+            "features": tuple(features),
+            "price": price,
+            "search_terms": [name, category],
+            "match_text": f"{name} {category}",
+        },
+    )
+
+
+class FallbackSelectionTest(unittest.TestCase):
+    def setUp(self):
+        self.docs = [
+            _live_like_document("1", "데리버거", "버거", ["달콤함", "아이 추천"], 2800),
+            _live_like_document("5", "핫크리스피 치킨버거", "버거", ["매콤함", "바삭함"], 4500),
+            _live_like_document("9", "양념감자", "사이드", ["바삭함", "아이 추천"], 2700),
+            _live_like_document("14", "콜라", "음료", ["달콤함"], 2100),
+            _live_like_document("17", "아이스아메리카노", "음료", [], 2600),
+        ]
+
+    def _ids(self, query, top_k=3):
+        return [item.menu_id for item in _fallback_recommendations(query, self.docs, top_k)]
+
+    def test_fallback_picks_by_feature_tag(self):
+        self.assertEqual(self._ids("매운 거 추천해줘"), ["5"])
+
+    def test_fallback_picks_cheapest_first_for_price_query(self):
+        self.assertEqual(self._ids("싼 거"), ["14", "17", "9"])
+
+    def test_fallback_price_query_respects_category(self):
+        self.assertEqual(self._ids("싼 버거 추천해줘"), ["1", "5"])
+
+    def test_fallback_child_query_ignores_iced_drink_name(self):
+        # "아이스"는 "아이" 조건으로 보지 않는다.
+        self.assertEqual(self._ids("아이스 아메리카노 추천해줘"), ["1", "5", "9"])  # 태그로 좁혀지지 않음
+        self.assertEqual(self._ids("아이가 먹기 좋은 거"), ["1", "9"])
+
+    def test_fallback_keeps_score_order_without_matching_condition(self):
+        self.assertEqual(self._ids("추천해줘"), ["1", "5", "9"])
+
+    def test_fallback_reason_mentions_tag_or_price(self):
+        tag_item = _fallback_recommendations("매운 거", self.docs, 1)[0]
+        price_item = _fallback_recommendations("싼 거", self.docs, 1)[0]
+
+        self.assertIn("매콤함", tag_item.reason)
+        self.assertIn("2,100원", price_item.reason)
 
 
 class RecommendationServiceAsyncTest(unittest.IsolatedAsyncioTestCase):
