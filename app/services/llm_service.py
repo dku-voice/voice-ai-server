@@ -1115,6 +1115,26 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
     return ("fallback", _fallback_keyword_parse(text, language=language))
 
 
+KOREAN_LLM_CUE_PATTERN = re.compile(
+    r"말고|대신|취소|바꿔|바꾸|중에|하나만|한\s*개만|한\s*잔만|같은\s*걸로|아까|더\s*주|더\s*추가|(?:은|는)\s*빼"
+)
+
+
+def korean_llm_reason(text: str, items: List[OrderItem]) -> str | None:
+    if not items:
+        from app.services.voice_recommendation import has_preference_cue
+
+        if has_preference_cue(text):
+            return None
+        return "메뉴를 찾지 못함"
+    match = KOREAN_LLM_CUE_PATTERN.search(text)
+    if match:
+        return f"복잡한 표현 '{match.group(0)}'"
+    if "버거" in text and not any("버거" in MENU_CATALOG.get(item.menu_id, "") for item in items):
+        return "버거를 찾지 못함"
+    return None
+
+
 async def extract_order(text: str, language: str = "ko") -> dict:
     """
     WebSocket 핸들러에서 호출하는 주문 파싱 함수.
@@ -1136,10 +1156,21 @@ async def extract_order(text: str, language: str = "ko") -> dict:
     if language == "ko" and LLM_SKIP_KOREAN:
         try:
             items = _fallback_keyword_parse(text)
-            return {"status": "success", "items": items, "error_msg": None}
         except Exception as e:
             logger.error("[LLM] 한국어 키워드 매칭 실패: %s", e)
             return {"status": "error", "items": [], "error_msg": "주문 처리 중 오류가 발생했습니다"}
+        reason = korean_llm_reason(text, items)
+        if not reason:
+            return {"status": "success", "items": items, "error_msg": None}
+        logger.info("[LLM] 한국어 키워드 결과를 Gemini로 다시 확인 (%s)", reason)
+        try:
+            phase, llm_items = await run_llm_task(_call_llm_sync, text, language)
+        except Exception as e:
+            logger.error("[LLM] 한국어 Gemini 확인 실패, 키워드 결과 사용: %s", e)
+            return {"status": "success", "items": items, "error_msg": None}
+        if phase == "success" and llm_items:
+            return {"status": "success", "items": llm_items, "error_msg": None}
+        return {"status": "success", "items": items, "error_msg": None}
 
     try:
         # LLM 호출도 블로킹이라 threadpool에서 실행한다.
