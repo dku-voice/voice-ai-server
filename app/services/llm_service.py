@@ -171,7 +171,7 @@ OPTION_TRIGGERS = {
     "less": ("적게", "적혀", "저게", "적개", "적계", "젖어", "적께", "쩍게", "작게", "조금", "덜", "약간", "살짝", "줄여", "살살"),
     "mention": ("",),
 }
-OPTION_FILLERS = ("", "를", "을", "은", "는", "도", "만", "좀", "하나", "한장", "한개", "1장", "1개", "두장", "2장")
+OPTION_FILLERS = ("", "를", "을", "은", "는", "도", "만", "좀", "하나", "한장", "한개", "1장", "1개", "두장", "2장", ",", "、", "그리고")
 OPTION_NAMES = tuple(dict.fromkeys(rule[0] for rule in OPTION_RULES))
 
 
@@ -184,7 +184,7 @@ def _option_pattern(ingredients: tuple[str, ...], kind: str) -> re.Pattern:
 
 OPTION_PATTERNS = tuple((name, _option_pattern(words, kind)) for name, words, kind in OPTION_RULES)
 OPTION_KIND_BY_NAME = {name: kind for name, _, kind in OPTION_RULES if kind != "mention"}
-OPTION_LIST_CONNECTORS = ("이랑", "랑", "하고", "와", "과", "및", "그리고", "도", ",", "、")
+OPTION_LIST_CONNECTORS = ("이랑", "랑", "이란", "란", "하고", "하구", "허고", "와", "과", "및", "그리고", "또", "도", ",", "、")
 
 
 def _option_list_pattern(kind: str) -> re.Pattern:
@@ -963,10 +963,10 @@ def _build_foreign_option_patterns() -> dict[str, tuple[tuple[re.Pattern, str], 
 
 FOREIGN_OPTION_PATTERNS = _build_foreign_option_patterns()
 FOREIGN_LIST_CONNECTORS = {
-    "en": r"and|&|,|or|plus",
-    "es": r"y|e|ni|,|con",
-    "ja": r"と|や|、|,",
-    "th": r"และ|กับ|,|แล้วก็",
+    "en": r"andalso|aswellas|and|&|,|or|plus",
+    "es": r"ytambi[eé]n|y|e|ni|,|con",
+    "ja": r"とか|と|や|も|、|,",
+    "th": r"และ|กับ|,|แล้วก็|แล้ว",
 }
 
 
