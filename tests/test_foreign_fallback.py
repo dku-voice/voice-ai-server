@@ -187,6 +187,21 @@ class ForeignFallbackTest(unittest.TestCase):
         phase, items = llm_service._prefer_keywords_when_llm_empty([], "สวัสดีครับ", "th")
         self.assertEqual((phase, items), ("success", []))
 
+    def _check(self, text, language, menu_ids):
+        from app.schemas import OrderItem
+
+        items = [OrderItem(menu_id=menu_id, quantity=1, options=[]) for menu_id in menu_ids]
+        return [item.menu_id for item in llm_service._validate_foreign_items(items, text, language)]
+
+    def test_foreign_llm_menu_without_sound_evidence_is_dropped(self):
+        self.assertEqual(self._check("อร์คุณลาสอง เกอร์, ขภอร์เกอร์", "th", ["1"]), [])
+        self.assertEqual(self._check("Hi!", "en", ["14"]), [])
+
+    def test_foreign_llm_menu_with_sound_evidence_is_kept(self):
+        self.assertEqual(self._check("ขอโคล่าสองแก้ว", "th", ["14"]), ["14"])
+        self.assertEqual(self._check("デリーバラガーを2個", "ja", ["1"]), ["1"])
+        self.assertEqual(self._check("Can I get two Teri burgers, so it's onions?", "en", ["1"]), ["1"])
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])
