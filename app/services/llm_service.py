@@ -445,8 +445,8 @@ def _quantity_from_match(match: re.Match) -> int | None:
     return None
 
 
-def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int) -> int:
-    """메뉴명 바로 앞뒤에 붙은 수량 표현을 찾고, 없으면 1개로 처리한다."""
+def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int, floor: int = 0) -> tuple[int, int]:
+    """메뉴명 바로 앞뒤에 붙은 수량 표현을 찾고, 없으면 1개로 처리한다. 앞 메뉴가 이미 쓴 수량은 다시 쓰지 않는다."""
     after_window = normalized_text[end_idx:end_idx + 8]
     for after_match in QUANTITY_PATTERN.finditer(after_window):
         prefix = QUANTITY_PREFIX_PUNCTUATION.sub("", after_window[:after_match.start()])
@@ -454,9 +454,10 @@ def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int)
             continue
         quantity = _quantity_from_match(after_match)
         if quantity is not None:
-            return quantity
+            return quantity, end_idx + after_match.end()
 
-    before_window = normalized_text[max(0, start_idx - 8):start_idx]
+    window_start = max(0, start_idx - 8, floor)
+    before_window = normalized_text[window_start:start_idx]
     before_matches = list(QUANTITY_PATTERN.finditer(before_window))
     for match in reversed(before_matches):
         tail = before_window[match.end():]
@@ -464,9 +465,9 @@ def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int)
             continue
         quantity = _quantity_from_match(match)
         if quantity is not None:
-            return quantity
+            return quantity, end_idx
 
-    return 1
+    return 1, end_idx
 
 
 def _is_alias_match_allowed(normalized_text: str, end_idx: int, menu_id: str, alias: str) -> bool:
@@ -904,8 +905,9 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
         if target is not None and option_name not in options_per_menu[target]:
             options_per_menu[target].append(option_name)
 
+    consumed_until = 0
     for (start_idx, end_idx, menu_id), options in zip(menu_matches, options_per_menu):
-        quantity = _find_quantity_near_menu(normalized_text, start_idx, end_idx)
+        quantity, consumed_until = _find_quantity_near_menu(normalized_text, start_idx, end_idx, consumed_until)
         items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
 
     items = _merge_duplicate_items(items)
