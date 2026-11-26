@@ -202,6 +202,11 @@ class ForeignFallbackTest(unittest.TestCase):
         self.assertEqual(self._check("デリーバラガーを2個", "ja", ["1"]), ["1"])
         self.assertEqual(self._check("Can I get two Teri burgers, so it's onions?", "en", ["1"]), ["1"])
 
+    def test_english_to_before_menu_means_two(self):
+        self.assertEqual(self.parse("Can I get to Teri burgers?", "en"), [("1", 2, [])])
+        self.assertEqual(self.parse("I want to order a cola", "en"), [("14", 1, [])])
+        self.assertEqual(self.parse("I want to order cola", "en"), [("14", 1, [])])
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])
