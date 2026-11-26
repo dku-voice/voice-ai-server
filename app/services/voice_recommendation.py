@@ -15,7 +15,8 @@ RECOMMENDATION_REQUEST_PATTERN = re.compile(
     r"추천|뭐가\s*맛있|뭐가\s*좋|뭐\s*먹|뭘\s*먹|뭐\s*마실|뭘\s*마실|어떤\s*게\s*좋|골라\s*줘|고를까"
     r"|おすすめ|オススメ|お勧め|お薦め|何がいい|何がおいしい|何が美味しい"
     r"|recomi|recomend|sugier|qu[eé]\s+est[aá]\s+bueno"
-    r"|แนะนำ|อะไรอร่อย",
+    r"|แนะนำ|อะไรอร่อย"
+    r"|recommend|suggest|what'?s\s+good|what\s+should\s+i\s+(?:get|eat|order|have)",
     re.IGNORECASE,
 )
 

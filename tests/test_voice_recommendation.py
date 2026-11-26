@@ -8,6 +8,8 @@ from app.services import voice_recommendation as V
 
 class RecommendationIntentTest(unittest.TestCase):
     def test_recommendation_requests(self):
+        for text in ("What do you recommend?", "what's good here", "what should I get"):
+            self.assertTrue(V.is_recommendation_request(text), text)
         for text in [
             "산뜻한 거 추천해줘", "뭐가 맛있어요?", "뭐 먹을까", "음료 뭐 마실까",
             "おすすめは何ですか", "¿Qué me recomiendas?", "แนะนำเมนูหน่อย",

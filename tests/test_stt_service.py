@@ -78,10 +78,11 @@ class LanguagePickTest(unittest.TestCase):
         self.assertEqual(stt_service._pick_language(self._info("ja", 0.92), "ko"), "ja")
 
     def test_unknown_screen_language_is_ignored(self):
-        self.assertEqual(stt_service._pick_language(self._info("th", 0.31), "en"), "ko")
+        self.assertEqual(stt_service._pick_language(self._info("th", 0.31), "fr"), "ko")
 
     def test_unsupported_language_without_probs_defaults_to_korean(self):
-        self.assertEqual(stt_service._pick_language(self._info("en", 0.99)), "ko")
+        self.assertEqual(stt_service._pick_language(self._info("pt", 0.99)), "ko")
+        self.assertEqual(stt_service._pick_language(self._info("en", 0.99)), "en")
 
     def test_retranscribes_when_detected_language_is_not_supported(self):
         old_model = stt_service._whisper_model

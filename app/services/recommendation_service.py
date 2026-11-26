@@ -89,7 +89,7 @@ RECOMMENDATION_INTENT_TERMS = (
 )
 
 RECOMMENDATION_SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk의 메뉴 추천 마이크로서비스입니다.
-고객 요청은 한국어, 일본어, 스페인어, 태국어 중 하나일 수 있습니다.
+고객 요청은 한국어, 영어, 일본어, 스페인어, 태국어 중 하나일 수 있습니다.
 반드시 제공된 메뉴 문서에 있는 menu_id만 추천하세요.
 메뉴 문서에 없는 가격, 알레르기, 매운맛, 재고 정보는 지어내지 마세요.
 요청은 아래 기준으로 해석하세요.
@@ -451,7 +451,7 @@ def _format_documents_for_prompt(documents: Sequence[MenuDocument]) -> str:
     return "\n\n".join(document.page_content for document in documents)
 
 
-REASON_LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
+REASON_LANGUAGE_NAMES = {"ko": "한국어", "en": "영어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
 
 
 def _reason_language_instruction(language: str) -> str:

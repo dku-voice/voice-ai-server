@@ -92,9 +92,9 @@ SYSTEM_PROMPT = """당신은 패스트푸드점 Kiosk에 배포된 주문 정보
 3. 텍스트에서 우리 매장 메뉴에 있는 항목을 전혀 식별할 수 없는 경우, 반드시 빈 배열 []을 반환하십시오. 메뉴에 없는 항목을 절대 지어내지 마십시오(환각/Hallucination 방지).
 
 【다국어 주문 규칙】:
-고객은 한국어, 일본어, 스페인어, 태국어 중 하나로 주문할 수 있습니다. 어떤 언어로 말하든 메뉴명을 아래 한국어 메뉴 목록의 menu_id로 매칭하십시오. 수량도 해당 언어의 수 표현(예: ひとつ, dos, สอง)을 숫자로 변환하십시오. 수량을 말하지 않고 메뉴 이름만 말한 경우 quantity는 반드시 1입니다."""
+고객은 한국어, 영어, 일본어, 스페인어, 태국어 중 하나로 주문할 수 있습니다. 어떤 언어로 말하든 메뉴명을 아래 한국어 메뉴 목록의 menu_id로 매칭하십시오. 수량도 해당 언어의 수 표현(예: two, ひとつ, dos, สอง)을 숫자로 변환하십시오. 수량을 말하지 않고 메뉴 이름만 말한 경우 quantity는 반드시 1입니다."""
 
-LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
+LANGUAGE_NAMES = {"ko": "한국어", "en": "영어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
 
 
 def _user_prompt(text: str, language: str) -> str:
@@ -236,11 +236,22 @@ options에는 아래 이름만 그대로 넣고, 요청이 없으면 빈 배열�
 
 
 EXTRA_FOREIGN_ALIASES = {
-    "데리버거": ("teri burger", "teri burgers", "teriburger", "hamburguesa teriyaki", "hamburguesas teriyaki", "teri"),
-    "감자튀김": ("papas fritas", "papas", "patatas"),
-    "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos"),
+    "데리버거": ("teri burger", "teri burgers", "teriburger", "teriyaki burger", "hamburguesa teriyaki", "hamburguesas teriyaki", "teri"),
+    "더블 데리버거": ("double teriyaki", "double teri"),
+    "클래식 치즈버거": ("cheeseburger", "cheese burger"),
+    "더블 클래식 치즈버거": ("double cheeseburger", "double cheese burger"),
+    "핫크리스피 치킨버거": ("chicken burger", "spicy chicken burger", "crispy chicken burger"),
+    "모짜렐라 베이컨 버거": ("bacon burger", "mozzarella burger"),
+    "모짜렐라 베이컨버거": ("bacon burger", "mozzarella burger"),
+    "감자튀김": ("papas fritas", "papas", "patatas", "fries"),
+    "양념감자": ("seasoned fries", "seasoned potatoes"),
+    "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos", "mozzarella sticks"),
     "치킨너겟": ("nuggets", "nuggets de pollo"),
-    "콜라": ("coca cola", "coca-cola", "colas"),
+    "오징어링": ("squid rings", "calamari"),
+    "콜라": ("coca cola", "coca-cola", "colas", "coke"),
+    "제로슈거콜라": ("coke zero", "zero coke", "diet coke", "zero cola"),
+    "사이다": ("sprite", "lemon lime soda"),
+    "아이스아메리카노": ("americano", "iced coffee"),
 }
 
 
@@ -514,7 +525,7 @@ def _quantity_by_menu_id(items: List[OrderItem]) -> dict[str, int]:
     return quantities
 
 
-FOREIGN_FALLBACK_LANGUAGES = ("ja", "es", "th")
+FOREIGN_FALLBACK_LANGUAGES = ("en", "ja", "es", "th")
 JA_QUANTITY_WORDS = {
     "ひとつ": 1, "ふたつ": 2, "みっつ": 3, "よっつ": 4, "いつつ": 5,
     "むっつ": 6, "ななつ": 7, "やっつ": 8, "ここのつ": 9, "とお": 10,
@@ -529,6 +540,11 @@ ES_QUANTITY_WORDS = {
     "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
 }
 ES_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(ES_QUANTITY_WORDS) + r"|[0-9]+)\b")
+EN_QUANTITY_WORDS = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "couple": 2,
+}
+EN_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(EN_QUANTITY_WORDS) + r"|[0-9]+)\b")
 TH_QUANTITY_WORDS = {
     "หนึ่ง": 1, "สอง": 2, "สาม": 3, "สี่": 4, "ห้า": 5,
     "หก": 6, "เจ็ด": 7, "แปด": 8, "เก้า": 9, "สิบ": 10,
@@ -549,6 +565,27 @@ FOREIGN_OPTION_SYNONYMS: dict[str, dict[str, str]] = {
         "ちーずついか": "치즈 추가",
         "べーこんついか": "베이컨 추가",
         "そーすすくなめ": "소스 적게",
+    },
+    "en": {
+        "no onion": "양파 제거",
+        "without onion": "양파 제거",
+        "hold the onion": "양파 제거",
+        "no tomato": "토마토 제거",
+        "without tomato": "토마토 제거",
+        "hold the tomato": "토마토 제거",
+        "extra cheese": "치즈 추가",
+        "with cheese": "치즈 추가",
+        "add bacon": "베이컨 추가",
+        "extra bacon": "베이컨 추가",
+        "with bacon": "베이컨 추가",
+        "extra tomato": "토마토 추가",
+        "extra patty": "비프패티 추가",
+        "add a patty": "비프패티 추가",
+        "add an egg": "반숙계란 추가",
+        "with an egg": "반숙계란 추가",
+        "light sauce": "소스 적게",
+        "less sauce": "소스 적게",
+        "easy on the sauce": "소스 적게",
     },
     "es": {
         "queso extra": "치즈 추가",
@@ -609,6 +646,15 @@ def _es_quantity(segment: str) -> int | None:
     return _clamp_quantity(value)
 
 
+def _en_quantity(segment: str) -> int | None:
+    matches = list(EN_QUANTITY_PATTERN.finditer(segment.lower()))
+    if not matches:
+        return None
+    token = matches[-1].group(1)
+    value = int(token) if token.isdigit() else EN_QUANTITY_WORDS[token]
+    return _clamp_quantity(value)
+
+
 def _th_quantity(segment: str) -> int | None:
     match = TH_QUANTITY_PATTERN.search(segment)
     if not match:
@@ -627,14 +673,15 @@ def _foreign_quantity(
     language: str,
 ) -> int:
     start_idx, end_idx, _ = menu_matches[position]
-    if language == "es":
+    if language in ("es", "en"):
         previous_end = menu_matches[position - 1][1] if position > 0 else 0
         if start_idx <= previous_end:
             return 1
         original_start = index_map[previous_end] if previous_end < len(index_map) else len(text)
         original_end = index_map[start_idx]
         segment = text[original_start:original_end][-30:]
-        return _es_quantity(segment) or 1
+        quantity_of = _en_quantity if language == "en" else _es_quantity
+        return quantity_of(segment) or 1
     next_start = menu_matches[position + 1][0] if position + 1 < len(menu_matches) else len(normalized_text)
     segment = normalized_text[end_idx:min(next_start, end_idx + FOREIGN_QUANTITY_WINDOW)]
     if language == "ja":
