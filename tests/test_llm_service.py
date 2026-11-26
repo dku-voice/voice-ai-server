@@ -346,5 +346,14 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 2)])
 
 
+    def test_korean_quantity_is_not_reused_by_next_menu(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        items = _fallback_keyword_parse("콜라 두 개 감자튀김 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 2), ("fries_01", 1)])
+        items = _fallback_keyword_parse("두 개 감자튀김", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("fries_01", 2)])
+
+
 if __name__ == "__main__":
     unittest.main()
