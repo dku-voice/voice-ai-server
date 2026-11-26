@@ -69,6 +69,14 @@ class MenuOptionTest(unittest.TestCase):
         self.assertEqual(self.parse("데리버거 토마토 제외"), [("1", 1, ["토마토 제거"])])
         self.assertEqual(self.parse("데리버거 소스 살살"), [("1", 1, ["소스 적게"])])
 
+    def test_option_word_mishearings(self):
+        for heard in ("젖어", "적께", "쩍게", "작게"):
+            self.assertEqual(self.parse(f"데리버거 소스 {heard}"), [("1", 1, ["소스 적게"])], heard)
+        for heard in ("뻬", "재거", "제고"):
+            self.assertEqual(self.parse(f"데리버거 양파 {heard}"), [("1", 1, ["양파 제거"])], heard)
+        for heard in ("추기", "츄가"):
+            self.assertEqual(self.parse(f"데리버거 치즈 {heard}"), [("1", 1, ["치즈 추가"])], heard)
+
     def test_add_options_with_aliases(self):
         self.assertEqual(
             self.parse("데리버거 패티 추가 반숙 계란 추가 베이컨 추가 토마토 추가"),
