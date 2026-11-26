@@ -67,6 +67,12 @@ class MenuOptionTest(unittest.TestCase):
         )
         self.assertEqual(self.parse("데리버거 소스 저게 주세요"), [("1", 1, ["소스 적게"])])
 
+    def test_one_trigger_for_several_ingredients(self):
+        self.assertEqual(self.parse("데리버거 치즈랑 토마토 추가 해줘"), [("1", 1, ["치즈 추가", "토마토 추가"])])
+        self.assertEqual(self.parse("데리버거 치즈하고 베이컨 추가"), [("1", 1, ["치즈 추가", "베이컨 추가"])])
+        self.assertEqual(self.parse("데리버거 양파랑 토마토 빼줘"), [("1", 1, ["양파 제거", "토마토 제거"])])
+        self.assertEqual(self.parse("데리버거 치즈 빼고 베이컨 추가"), [("1", 1, ["베이컨 추가"])])
+
     def test_more_korean_option_expressions(self):
         self.assertEqual(self.parse("데리버거 양파는 넣지 마세요"), [("1", 1, ["양파 제거"])])
         self.assertEqual(self.parse("데리버거 노 어니언"), [("1", 1, ["양파 제거"])])
