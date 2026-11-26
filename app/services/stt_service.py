@@ -130,7 +130,7 @@ def _strip_brand(name: str) -> str:
 
 
 EVERYDAY_HOTWORDS = {
-    "ko": ("제로콜라", "감튀", "너겟", "치즈버거", "아메리카노", "양파 빼고", "치즈 추가"),
+    "ko": ("한 개", "두 개", "세 개", "네 개", "다섯 개", "한 잔", "두 잔", "세 잔", "네 잔", "다섯 잔", "제로콜라", "감튀", "너겟", "치즈버거", "아메리카노", "양파 빼고", "치즈 추가"),
     "en": ("Coke", "Cokes", "Coke Zero", "Fries", "Cheeseburger", "Nuggets", "Sprite", "no onions"),
     "ja": ("コーラ", "ポテト", "チーズバーガー", "ナゲット", "玉ねぎ抜き", "テリヤキバーガー"),
     "es": ("Coca-Cola", "papas fritas", "hamburguesa", "sin cebolla", "nuggets"),

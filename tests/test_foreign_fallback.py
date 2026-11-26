@@ -176,6 +176,10 @@ class ForeignFallbackTest(unittest.TestCase):
             [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
         )
 
+    def test_thai_cola_mishearings(self):
+        self.assertEqual(self.parse("ขอโคลาสอนเกี่ยว", "th"), [("14", 2, [])])
+        self.assertEqual(self.parse("ขอคุณล่าสองแกลง", "th"), [("14", 2, [])])
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])

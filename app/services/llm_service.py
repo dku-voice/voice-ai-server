@@ -266,7 +266,7 @@ EXTRA_FOREIGN_ALIASES = {
     "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos", "mozzarella sticks", "ชีสสติก"),
     "치킨너겟": ("nuggets", "nuggets de pollo", "너겟", "치킨 너겟", "너깃", "ナゲット", "นักเก็ต"),
     "오징어링": ("squid rings", "calamari", "오징어", "イカリング", "aros de calamar", "calamares", "ปลาหมึกทอด"),
-    "콜라": ("coca cola", "coca-cola", "colas", "coke", "코카콜라", "コーク", "โค้ก"),
+    "콜라": ("coca cola", "coca-cola", "colas", "coke", "코카콜라", "コーク", "โค้ก", "โคลา", "คุณล่า"),
     "제로슈거콜라": (
         "coke zero", "zero coke", "diet coke", "zero cola", "제로콜라", "제로 콜라", "콜라 제로", "제로슈가콜라",
         "ゼロコーラ", "コーラゼロ", "コークゼロ", "coca-cola zero", "coca cola zero", "cola zero", "โค้กซีโร่", "โค้กไม่มีน้ำตาล",
@@ -572,6 +572,7 @@ EN_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(EN_QUANTITY_WORDS) + r"|[0-9]
 TH_QUANTITY_WORDS = {
     "หนึ่ง": 1, "สอง": 2, "สาม": 3, "สี่": 4, "ห้า": 5,
     "หก": 6, "เจ็ด": 7, "แปด": 8, "เก้า": 9, "สิบ": 10,
+    "สอน": 2,
 }
 TH_QUANTITY_PATTERN = re.compile("(" + "|".join(TH_QUANTITY_WORDS) + "|[0-9]+)")
 FOREIGN_QUANTITY_WINDOW = 12
