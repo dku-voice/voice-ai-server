@@ -236,22 +236,46 @@ options에는 아래 이름만 그대로 넣고, 요청이 없으면 빈 배열�
 
 
 EXTRA_FOREIGN_ALIASES = {
-    "데리버거": ("teri burger", "teri burgers", "teriburger", "teriyaki burger", "hamburguesa teriyaki", "hamburguesas teriyaki", "teri"),
-    "더블 데리버거": ("double teriyaki", "double teri"),
-    "클래식 치즈버거": ("cheeseburger", "cheese burger"),
-    "더블 클래식 치즈버거": ("double cheeseburger", "double cheese burger"),
-    "핫크리스피 치킨버거": ("chicken burger", "spicy chicken burger", "crispy chicken burger"),
-    "모짜렐라 베이컨 버거": ("bacon burger", "mozzarella burger"),
-    "모짜렐라 베이컨버거": ("bacon burger", "mozzarella burger"),
-    "감자튀김": ("papas fritas", "papas", "patatas", "fries"),
-    "양념감자": ("seasoned fries", "seasoned potatoes"),
-    "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos", "mozzarella sticks"),
-    "치킨너겟": ("nuggets", "nuggets de pollo"),
-    "오징어링": ("squid rings", "calamari"),
-    "콜라": ("coca cola", "coca-cola", "colas", "coke"),
-    "제로슈거콜라": ("coke zero", "zero coke", "diet coke", "zero cola"),
-    "사이다": ("sprite", "lemon lime soda"),
-    "아이스아메리카노": ("americano", "iced coffee"),
+    "데리버거": (
+        "teri burger", "teri burgers", "teriburger", "teriyaki burger", "hamburguesa teriyaki", "hamburguesas teriyaki", "teri",
+        "데리야끼버거", "데리야키버거", "테리야키버거",
+        "テリヤキバーガー", "てりやきバーガー", "照り焼きバーガー", "てりバーガー",
+        "เทอริยากิเบอร์เกอร์", "เบอร์เกอร์เทอริยากิ",
+    ),
+    "더블 데리버거": ("double teriyaki", "double teri", "더블데리", "ダブルテリ", "ดับเบิ้ลเทริ"),
+    "클래식 치즈버거": (
+        "cheeseburger", "cheese burger", "치즈버거", "치즈 버거", "チーズバーガー",
+        "hamburguesa con queso", "hamburguesa de queso", "ชีสเบอร์เกอร์",
+    ),
+    "더블 클래식 치즈버거": (
+        "double cheeseburger", "double cheese burger", "더블 치즈버거", "더블치즈버거", "ダブルチーズバーガー",
+        "doble hamburguesa con queso", "ดับเบิ้ลชีสเบอร์เกอร์",
+    ),
+    "핫크리스피 치킨버거": (
+        "chicken burger", "spicy chicken burger", "crispy chicken burger", "치킨버거", "핫크리스피", "チキンバーガー",
+        "hamburguesa de pollo", "เบอร์เกอร์ไก่",
+    ),
+    "모짜렐라 베이컨 버거": ("bacon burger", "mozzarella burger", "베이컨버거", "베이컨 버거", "ベーコンバーガー", "เบอร์เกอร์เบคอน"),
+    "모짜렐라 베이컨버거": ("bacon burger", "mozzarella burger", "베이컨버거", "베이컨 버거", "ベーコンバーガー", "เบอร์เกอร์เบคอน"),
+    "새우버거": ("えびバーガー", "海老バーガー"),
+    "감자튀김": (
+        "papas fritas", "papas", "patatas", "fries", "감튀", "프렌치프라이", "후렌치후라이",
+        "ポテト", "เฟรนช์ฟราย", "เฟรนฟราย", "มันฝรั่งทอด", "มันทอด",
+    ),
+    "양념감자": ("seasoned fries", "seasoned potatoes", "양념 감자", "シーズニングポテト", "มันฝรั่งปรุงรส"),
+    "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos", "mozzarella sticks", "ชีสสติก"),
+    "치킨너겟": ("nuggets", "nuggets de pollo", "너겟", "치킨 너겟", "너깃", "ナゲット", "นักเก็ต"),
+    "오징어링": ("squid rings", "calamari", "오징어", "イカリング", "aros de calamar", "calamares", "ปลาหมึกทอด"),
+    "콜라": ("coca cola", "coca-cola", "colas", "coke", "코카콜라", "コーク", "โค้ก"),
+    "제로슈거콜라": (
+        "coke zero", "zero coke", "diet coke", "zero cola", "제로콜라", "제로 콜라", "콜라 제로", "제로슈가콜라",
+        "ゼロコーラ", "コーラゼロ", "コークゼロ", "coca-cola zero", "coca cola zero", "cola zero", "โค้กซีโร่", "โค้กไม่มีน้ำตาล",
+    ),
+    "사이다": ("sprite", "lemon lime soda", "스프라이트", "칠성사이다", "スプライト", "サイダー", "สไปรท์"),
+    "아이스아메리카노": (
+        "americano", "iced coffee", "아아", "아이스 아메리카노", "아메리카노", "아이스커피",
+        "アイスコーヒー", "アメリカーノ", "café americano", "อเมริกาโน่", "กาแฟเย็น",
+    ),
 }
 
 

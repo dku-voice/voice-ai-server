@@ -129,6 +129,15 @@ def _strip_brand(name: str) -> str:
     return name
 
 
+EVERYDAY_HOTWORDS = {
+    "ko": ("제로콜라", "감튀", "너겟", "치즈버거", "아메리카노", "양파 빼고", "치즈 추가"),
+    "en": ("Coke", "Cokes", "Coke Zero", "Fries", "Cheeseburger", "Nuggets", "Sprite", "no onions"),
+    "ja": ("コーラ", "ポテト", "チーズバーガー", "ナゲット", "玉ねぎ抜き", "テリヤキバーガー"),
+    "es": ("Coca-Cola", "papas fritas", "hamburguesa", "sin cebolla", "nuggets"),
+    "th": ("โค้ก", "เฟรนช์ฟราย", "ชีสเบอร์เกอร์", "นักเก็ต", "ไม่ใส่หอม"),
+}
+
+
 def _hotwords_for(language: str | None) -> str | None:
     if not language or language not in STT_HOTWORD_LANGUAGES:
         return None
@@ -139,6 +148,7 @@ def _hotwords_for(language: str | None) -> str | None:
         return None
     if language == "ko":
         names = tuple(dict.fromkeys(_strip_brand(name) for name in names))
+    names = tuple(dict.fromkeys(EVERYDAY_HOTWORDS.get(language, ()) + tuple(names)))
     return ", ".join(names)[:400]
 
 
