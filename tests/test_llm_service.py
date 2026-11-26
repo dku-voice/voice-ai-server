@@ -285,13 +285,10 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual([(i.menu_id, i.quantity) for i in result["items"]], [("cola_01", 1)])
 
-    def test_korean_unmatched_text_asks_llm(self):
-        from app.schemas import OrderItem
-
-        llm_items = [OrderItem(menu_id="cola_01", quantity=2, options=[])]
-        result, calls = self._korean("코올라 두 개", ("success", llm_items))
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(result["items"][0].menu_id, "cola_01")
+    def test_korean_unmatched_text_skips_llm(self):
+        result, calls = self._korean("코올라 두 개", ("success", []))
+        self.assertEqual(calls, [])
+        self.assertEqual(result["items"], [])
 
     def test_korean_llm_failure_keeps_keyword_result(self):
         result, calls = self._korean("클래식 버거 말고 콜라 하나", RuntimeError("503"))
@@ -299,13 +296,11 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertTrue(result["items"])
 
-    def test_korean_misheard_burger_asks_llm(self):
+    def test_korean_misheard_burger_skips_llm(self):
         from app.services import llm_service
 
         cola = llm_service._fallback_keyword_parse("콜라 세 개", log_result=False)
-        self.assertEqual(llm_service.korean_llm_reason("이버거 2개, 콜라 3개", cola), "버거를 찾지 못함")
-        burger = llm_service._fallback_keyword_parse("클래식 버거 하나", log_result=False)
-        self.assertIsNone(llm_service.korean_llm_reason("클래식 버거 하나", burger))
+        self.assertIsNone(llm_service.korean_llm_reason("이버거 2개, 콜라 3개", cola))
 
     def test_korean_preference_request_skips_llm(self):
         result, calls = self._korean("매운 거 있어요?", ("success", []))
