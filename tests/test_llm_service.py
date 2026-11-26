@@ -355,5 +355,38 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual([(i.menu_id, i.quantity) for i in items], [("fries_01", 2)])
 
 
+    def test_korean_misheard_three_and_four(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        items = _fallback_keyword_parse("콜라, 내장, 감자튀김, 새잔 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 4), ("fries_01", 3)])
+        items = _fallback_keyword_parse("콜라 새전 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 3)])
+
+    def test_korean_menu_with_quantity_before_malgo_is_excluded(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        items = _fallback_keyword_parse("콜라 두 잔 말고 감자튀김 두 개 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("fries_01", 2)])
+        items = _fallback_keyword_parse("감자튀김 두 개 빼고 콜라 하나", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 1)])
+
+
+    def test_korean_quantity_correction(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        cases = {
+            "콜라 두 잔 말고 세 잔으로": [("cola_01", 3)],
+            "감자튀김 하나 말고 두 개": [("fries_01", 2)],
+            "콜라 세 잔, 아니 네 잔": [("cola_01", 4)],
+            "콜라 세잔, 아니 콜라 내잔으로": [("cola_01", 4)],
+            "감자튀김 두 개 콜라 아니 치킨 하나": [("fries_01", 2), ("chicken_01", 1)],
+            "콜라 두 잔 말고 감자튀김 세 개": [("fries_01", 3)],
+        }
+        for text, expected in cases.items():
+            items = _fallback_keyword_parse(text, log_result=False)
+            self.assertEqual([(i.menu_id, i.quantity) for i in items], expected, text)
+
+
 if __name__ == "__main__":
     unittest.main()
