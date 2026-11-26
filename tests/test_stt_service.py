@@ -168,6 +168,13 @@ class LanguagePickTest(unittest.TestCase):
         self.assertEqual(calls[1][0], "ko")
         self.assertIn("데리버거", calls[1][1])
 
+    def test_english_hotwords_start_with_everyday_words(self):
+        with patch("app.services.llm_service.menu_names_for_language", return_value=("Teriyaki Burger", "Cola")):
+            hotwords = stt_service._hotwords_for("en")
+        self.assertTrue(hotwords.startswith("Coke, Cokes"))
+        self.assertIn("Teriyaki Burger", hotwords)
+        self.assertIn("Cola", hotwords)
+
     def test_korean_hotwords_drop_brand_prefix(self):
         with patch("app.services.llm_service.menu_names_for_language", return_value=("데리버거", "리아 불고기버거", "리아 새우버거")):
             hotwords = stt_service._hotwords_for("ko")

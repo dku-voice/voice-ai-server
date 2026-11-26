@@ -129,6 +129,11 @@ def _strip_brand(name: str) -> str:
     return name
 
 
+EVERYDAY_HOTWORDS = {
+    "en": ("Coke", "Cokes", "Coke Zero", "Fries", "Cheeseburger", "Nuggets", "Sprite", "no onions"),
+}
+
+
 def _hotwords_for(language: str | None) -> str | None:
     if not language or language not in STT_HOTWORD_LANGUAGES:
         return None
@@ -139,6 +144,7 @@ def _hotwords_for(language: str | None) -> str | None:
         return None
     if language == "ko":
         names = tuple(dict.fromkeys(_strip_brand(name) for name in names))
+    names = tuple(dict.fromkeys(EVERYDAY_HOTWORDS.get(language, ()) + tuple(names)))
     return ", ".join(names)[:400]
 
 
