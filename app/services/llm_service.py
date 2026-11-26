@@ -183,13 +183,27 @@ def _option_pattern(ingredients: tuple[str, ...], kind: str) -> re.Pattern:
 
 
 OPTION_PATTERNS = tuple((name, _option_pattern(words, kind)) for name, words, kind in OPTION_RULES)
+OPTION_KIND_BY_NAME = {name: kind for name, _, kind in OPTION_RULES if kind != "mention"}
+OPTION_LIST_CONNECTORS = ("이랑", "랑", "하고", "와", "과", "및", "그리고", "도", ",", "、")
 
 
-def _find_option_matches(normalized_text: str) -> list[tuple[int, int, str]]:
-    candidates = []
-    for name, pattern in OPTION_PATTERNS:
-        for match in pattern.finditer(normalized_text):
-            candidates.append((match.start(), match.end(), name))
+def _option_list_pattern(kind: str) -> re.Pattern:
+    words = sorted(
+        ((word, name) for name, ingredients, rule_kind in OPTION_RULES if rule_kind == kind for word in ingredients),
+        key=lambda item: -len(item[0]),
+    )
+    alternatives = "|".join(re.escape(word) for word, _ in words)
+    connectors = "|".join(re.escape(c) for c in OPTION_LIST_CONNECTORS)
+    return re.compile(rf"({alternatives})(?:{connectors})*$")
+
+
+OPTION_LIST_PATTERNS = {kind: _option_list_pattern(kind) for kind in ("add", "remove", "less")}
+OPTION_NAME_BY_KIND_WORD = {
+    (kind, word): name for name, ingredients, kind in OPTION_RULES if kind != "mention" for word in ingredients
+}
+
+
+def _resolve_option_overlaps(candidates: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
     candidates.sort(key=lambda c: (c[0], -(c[1] - c[0])))
     matches: list[tuple[int, int, str]] = []
     for candidate in candidates:
@@ -197,6 +211,38 @@ def _find_option_matches(normalized_text: str) -> list[tuple[int, int, str]]:
             continue
         matches.append(candidate)
     return matches
+
+
+def _shared_trigger_options(normalized_text: str, matches: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+    extra: list[tuple[int, int, str]] = []
+    taken = [(start, end) for start, end, _ in matches]
+    for start, _, name in matches:
+        kind = OPTION_KIND_BY_NAME.get(name)
+        pattern = OPTION_LIST_PATTERNS.get(kind)
+        if pattern is None:
+            continue
+        position = start
+        while True:
+            found = pattern.search(normalized_text[:position])
+            if not found or found.start() == position:
+                break
+            word_start, word_end = found.start(1), found.end(1)
+            if any(word_start < end and begin < word_end for begin, end in taken):
+                break
+            option = OPTION_NAME_BY_KIND_WORD[(kind, found.group(1))]
+            extra.append((word_start, word_end, option))
+            taken.append((word_start, word_end))
+            position = word_start
+    return extra
+
+
+def _find_option_matches(normalized_text: str) -> list[tuple[int, int, str]]:
+    candidates = []
+    for name, pattern in OPTION_PATTERNS:
+        for match in pattern.finditer(normalized_text):
+            candidates.append((match.start(), match.end(), name))
+    matches = _resolve_option_overlaps(candidates)
+    return sorted(matches + _shared_trigger_options(normalized_text, matches))
 
 
 def canonical_options(values: list[str]) -> list[str]:
@@ -916,6 +962,76 @@ def _build_foreign_option_patterns() -> dict[str, tuple[tuple[re.Pattern, str], 
 
 
 FOREIGN_OPTION_PATTERNS = _build_foreign_option_patterns()
+FOREIGN_LIST_CONNECTORS = {
+    "en": r"and|&|,|or|plus",
+    "es": r"y|e|ni|,|con",
+    "ja": r"と|や|、|,",
+    "th": r"และ|กับ|,|แล้วก็",
+}
+
+
+def _build_foreign_list_words() -> dict[tuple[str, str], tuple[str, str, str]]:
+    result = {}
+    for korean, ingredient, kind in FOREIGN_OPTION_KINDS:
+        for language, words in FOREIGN_OPTION_INGREDIENTS[ingredient].items():
+            result.setdefault((language, kind), []).append((words, korean))
+    patterns = {}
+    for (language, kind), entries in result.items():
+        alternatives = "|".join(f"(?P<g{index}>{words})" for index, (words, _) in enumerate(entries))
+        connectors = FOREIGN_LIST_CONNECTORS[language]
+        patterns[(language, kind)] = (
+            re.compile(f"^(?:{connectors})(?:the|a|an|la|el|las|los)?(?:{alternatives})"),
+            re.compile(f"(?:{alternatives})(?:{connectors})$"),
+            tuple(korean for _, korean in entries),
+        )
+    return patterns
+
+
+FOREIGN_LIST_PATTERNS = _build_foreign_list_words()
+FOREIGN_OPTION_KIND_BY_NAME = {korean: kind for korean, _, kind in FOREIGN_OPTION_KINDS}
+
+
+def _foreign_list_option(found: re.Match, names: tuple[str, ...]) -> str:
+    for key, value in found.groupdict().items():
+        if value is not None:
+            return names[int(key[1:])]
+    return names[0]
+
+
+def _foreign_shared_trigger_options(
+    normalized_text: str, language: str, matches: list[tuple[int, int, str]]
+) -> list[tuple[int, int, str]]:
+    extra: list[tuple[int, int, str]] = []
+    taken = [(start, end) for start, end, _ in matches]
+    for start, end, name in matches:
+        kind = FOREIGN_OPTION_KIND_BY_NAME.get(name)
+        patterns = FOREIGN_LIST_PATTERNS.get((language, kind))
+        if patterns is None:
+            continue
+        forward, backward, names = patterns
+        position = end
+        while True:
+            found = forward.search(normalized_text[position:])
+            if not found:
+                break
+            span = (position + found.start(), position + found.end())
+            if any(span[0] < finish and begin < span[1] for begin, finish in taken):
+                break
+            extra.append((span[0], span[1], _foreign_list_option(found, names)))
+            taken.append(span)
+            position = span[1]
+        position = start
+        while True:
+            found = backward.search(normalized_text[:position])
+            if not found:
+                break
+            span = (found.start(), found.end())
+            if any(span[0] < finish and begin < span[1] for begin, finish in taken):
+                break
+            extra.append((span[0], span[1], _foreign_list_option(found, names)))
+            taken.append(span)
+            position = span[0]
+    return extra
 
 
 def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tuple[int, int, str]]:
@@ -928,13 +1044,8 @@ def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tu
         while start_idx != -1:
             candidates.append((start_idx, start_idx + len(name), korean))
             start_idx = normalized_text.find(name, start_idx + 1)
-    candidates.sort(key=lambda c: (c[0], -(c[1] - c[0])))
-    matches: list[tuple[int, int, str]] = []
-    for candidate in candidates:
-        if any(candidate[0] < end and start < candidate[1] for start, end, _ in matches):
-            continue
-        matches.append(candidate)
-    return matches
+    matches = _resolve_option_overlaps(candidates)
+    return sorted(matches + _foreign_shared_trigger_options(normalized_text, language, matches))
 
 
 JA_KANA_QUANTITY_PATTERN = re.compile("([0-9]+|[一二三四五六七八九十])(?:ツ|個|コ|本|杯|枚|人前|点)")

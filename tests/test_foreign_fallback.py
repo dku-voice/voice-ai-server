@@ -233,6 +233,18 @@ class ForeignFallbackTest(unittest.TestCase):
         for (text, language), expected in cases.items():
             self.assertEqual(options(text, language), expected, text)
 
+    def test_one_trigger_for_several_ingredients(self):
+        def options(text, language):
+            normalized, _ = llm_service._normalize_with_map(text)
+            return sorted(name for _, _, name in llm_service._find_foreign_option_matches(normalized, language))
+
+        self.assertEqual(options("add cheese and bacon", "en"), ["베이컨 추가", "치즈 추가"])
+        self.assertEqual(options("without onions and tomatoes", "en"), ["양파 제거", "토마토 제거"])
+        self.assertEqual(options("sin cebolla ni tomate", "es"), ["양파 제거", "토마토 제거"])
+        self.assertEqual(options("チーズとベーコン追加", "ja"), ["베이컨 추가", "치즈 추가"])
+        self.assertEqual(options("เพิ่มชีสและเบคอน", "th"), ["베이컨 추가", "치즈 추가"])
+        self.assertEqual(options("with extra cheese and a coke", "en"), ["치즈 추가"])
+
     def test_cheese_sticks_are_not_cheese_option(self):
         self.assertEqual(self.parse("a teri burger with cheese sticks", "en"), [("1", 1, []), ("11", 1, [])])
         self.assertEqual(self.parse("テリバーガーとチーズスティック追加", "ja"), [("1", 1, []), ("11", 1, [])])
