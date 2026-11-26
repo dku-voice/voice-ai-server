@@ -502,6 +502,71 @@ def _is_menu_excluded_by_context(normalized_text: str, start_idx: int, end_idx: 
     return False
 
 
+CORRECTION_WORDS = ("말고", "대신", "아니요", "아니고", "아니")
+
+
+def _valid_quantity_at(text: str) -> re.Match | None:
+    match = QUANTITY_PATTERN.match(text)
+    if not match:
+        return None
+    try:
+        return match if _quantity_from_match(match) is not None else None
+    except LLMResponseValidationError:
+        return None
+
+
+def _correction_after(segment: str) -> tuple[str, int | None] | None:
+    tail = QUANTITY_PREFIX_PUNCTUATION.sub("", segment)
+    old = _valid_quantity_at(tail)
+    if old:
+        tail = tail[old.end():]
+    for word in CORRECTION_WORDS:
+        if tail.startswith(word) and not tail.startswith("아니면"):
+            rest = tail[len(word):]
+            new = _valid_quantity_at(rest)
+            if new:
+                return ("change", _quantity_from_match(new))
+            return ("drop", None)
+    return None
+
+
+def _find_korean_menu_matches(normalized_text: str) -> tuple[list[tuple[int, int, str]], dict[int, int]]:
+    """메뉴를 찾고, "콜라 두 잔 말고 세 잔"처럼 같은 메뉴의 수량을 고쳐 말한 경우를 반영한다."""
+    candidates: list[tuple[int, int, str]] = []
+    for menu_id, aliases in MENU_ALIASES.items():
+        for alias in aliases:
+            normalized_alias = _normalize_order_text(alias)
+            start_idx = normalized_text.find(normalized_alias)
+            while start_idx != -1:
+                end_idx = start_idx + len(normalized_alias)
+                if _is_alias_match_allowed(normalized_text, end_idx, menu_id, normalized_alias):
+                    candidates.append((start_idx, end_idx, menu_id))
+                start_idx = normalized_text.find(normalized_alias, start_idx + 1)
+    candidates.sort(key=lambda candidate: (candidate[0], -(candidate[1] - candidate[0])))
+    resolved: list[tuple[int, int, str]] = []
+    for candidate in candidates:
+        if resolved and candidate[0] < resolved[-1][1]:
+            continue
+        resolved.append(candidate)
+
+    matches: list[tuple[int, int, str]] = []
+    overrides: dict[int, int] = {}
+    for index, (start_idx, end_idx, menu_id) in enumerate(resolved):
+        next_start = resolved[index + 1][0] if index + 1 < len(resolved) else len(normalized_text)
+        next_menu = resolved[index + 1][2] if index + 1 < len(resolved) else None
+        correction = _correction_after(normalized_text[end_idx:next_start])
+        if correction and correction[0] == "change":
+            overrides[len(matches)] = correction[1]
+            matches.append((start_idx, end_idx, menu_id))
+            continue
+        if correction and correction[0] == "drop" and next_menu is not None:
+            continue
+        if _is_menu_excluded_by_context(normalized_text, start_idx, end_idx):
+            continue
+        matches.append((start_idx, end_idx, menu_id))
+    return matches, overrides
+
+
 def _find_menu_matches(normalized_text: str) -> list[tuple[int, int, str]]:
     """텍스트 안의 메뉴 키워드 위치를 겹치지 않게 찾는다."""
     candidates: list[tuple[int, int, str]] = []
@@ -903,7 +968,7 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
     normalized_text = _normalize_order_text(text)
     items: List[OrderItem] = []
 
-    menu_matches = _find_menu_matches(normalized_text)
+    menu_matches, quantity_overrides = _find_korean_menu_matches(normalized_text)
     option_matches = [
         option for option in _find_option_matches(normalized_text)
         if not any(option[0] < end and start < option[1] for start, end, _ in menu_matches)
@@ -917,8 +982,12 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
             options_per_menu[target].append(option_name)
 
     consumed_until = 0
-    for (start_idx, end_idx, menu_id), options in zip(menu_matches, options_per_menu):
+    for index, ((start_idx, end_idx, menu_id), options) in enumerate(zip(menu_matches, options_per_menu)):
         quantity, consumed_until = _find_quantity_near_menu(normalized_text, start_idx, end_idx, consumed_until)
+        if index in quantity_overrides:
+            quantity = quantity_overrides[index]
+            next_start = menu_matches[index + 1][0] if index + 1 < len(menu_matches) else len(normalized_text)
+            consumed_until = next_start
         items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
 
     items = _merge_duplicate_items(items)
