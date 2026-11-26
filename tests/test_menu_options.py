@@ -83,6 +83,9 @@ class MenuOptionTest(unittest.TestCase):
         self.assertEqual(self.parse("데리버거 치즈하구 베이컨 추가"), [("1", 1, ["치즈 추가", "베이컨 추가"])])
         self.assertEqual(self.parse("데리버거 치즈 또 베이컨 추가"), [("1", 1, ["치즈 추가", "베이컨 추가"])])
 
+    def test_onion_spelled_differently(self):
+        self.assertEqual(self.parse("데리버거 노 오니언"), [("1", 1, ["양파 제거"])])
+
     def test_more_korean_option_expressions(self):
         self.assertEqual(self.parse("데리버거 양파는 넣지 마세요"), [("1", 1, ["양파 제거"])])
         self.assertEqual(self.parse("데리버거 노 어니언"), [("1", 1, ["양파 제거"])])
@@ -140,6 +143,7 @@ class SeasonedFriesSauceTest(MenuOptionTest):
         self.assertEqual(self.items("양념감자 칠리로 주세요"), [("9", 1, ["칠리 소스"])])
         self.assertEqual(self.items("양념감자 치즈맛"), [("9", 1, ["치즈 소스"])])
         self.assertEqual(self.items("양념감자 어니언으로"), [("9", 1, ["어니언 소스"])])
+        self.assertEqual(self.items("양념감자, 오니언, 로아나"), [("9", 1, ["어니언 소스"])])
         self.assertEqual(self.items("양념감자 하나랑 치즈스틱 하나"), [("9", 1, []), ("20", 1, [])])
 
     def test_foreign_sauce_words(self):

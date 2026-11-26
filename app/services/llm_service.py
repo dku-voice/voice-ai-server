@@ -161,8 +161,8 @@ OPTION_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("소스 적게", ("소스",), "less"),
     ("치즈 소스", ("치즈소스",), "mention"),
     ("칠리 소스", ("칠리소스",), "mention"),
-    ("어니언 소스", ("어니언소스",), "mention"),
-    ("양파 제거", ("노어니언", "노양파"), "mention"),
+    ("어니언 소스", ("어니언소스", "어니온소스", "오니언소스", "오니온소스"), "mention"),
+    ("양파 제거", ("노어니언", "노어니온", "노오니언", "노양파"), "mention"),
     ("토마토 제거", ("노토마토",), "mention"),
 )
 OPTION_TRIGGERS = {
@@ -271,7 +271,7 @@ SAUCE_FLAVOR_WORDS = {
     "치즈 소스": ("치즈", "cheese", "チーズ", "ちーず", "queso", "ชีส"),
     "칠리 소스": ("칠리", "칠레", "치리", "chili", "chilli", "chile", "チリ", "ちり", "ชิลลี่", "ชิลี", "พริก"),
     "어니언 소스": (
-        "어니언", "어니온", "양파", "onion", "オニオン", "おにおん", "玉ねぎ", "たまねぎ", "タマネギ",
+        "어니언", "어니온", "오니언", "오니온", "양파", "onion", "オニオン", "おにおん", "玉ねぎ", "たまねぎ", "タマネギ",
         "cebolla", "หัวหอม", "หอม",
     ),
 }
@@ -365,7 +365,7 @@ EXTRA_FOREIGN_ALIASES = {
     "양념감자": ("seasoned fries", "seasoned potatoes", "양념 감자", "シーズニングポテト", "มันฝรั่งปรุงรส"),
     "치즈스틱": ("cheese stick", "cheese sticks", "sticks de queso", "palitos", "mozzarella sticks", "ชีสสติก"),
     "치킨너겟": ("nuggets", "nuggets de pollo", "너겟", "치킨 너겟", "너깃", "ナゲット", "นักเก็ต"),
-    "오징어링": ("squid rings", "calamari", "오징어", "イカリング", "aros de calamar", "calamares", "ปลาหมึกทอด"),
+    "오징어링": ("squid rings", "calamari", "오징어", "오징어 링", "오징링", "모짜렐링", "イカリング", "aros de calamar", "calamares", "ปลาหมึกทอด"),
     "콜라": ("coca cola", "coca-cola", "colas", "coke", "코카콜라", "コーク", "โค้ก", "โคลา", "คุณล่า"),
     "제로슈거콜라": (
         "coke zero", "zero coke", "diet coke", "zero cola", "제로콜라", "제로 콜라", "콜라 제로", "제로슈가콜라",
