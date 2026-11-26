@@ -1179,17 +1179,9 @@ KOREAN_LLM_CUE_PATTERN = re.compile(
 
 
 def korean_llm_reason(text: str, items: List[OrderItem]) -> str | None:
-    if not items:
-        from app.services.voice_recommendation import has_preference_cue
-
-        if has_preference_cue(text):
-            return None
-        return "메뉴를 찾지 못함"
     match = KOREAN_LLM_CUE_PATTERN.search(text)
     if match:
         return f"복잡한 표현 '{match.group(0)}'"
-    if "버거" in text and not any("버거" in MENU_CATALOG.get(item.menu_id, "") for item in items):
-        return "버거를 찾지 못함"
     return None
 
 
