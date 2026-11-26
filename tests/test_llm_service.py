@@ -280,7 +280,7 @@ class LLMServiceValidationTest(unittest.TestCase):
         from app.schemas import OrderItem
 
         llm_items = [OrderItem(menu_id="cola_01", quantity=1, options=[])]
-        result, calls = self._korean("클래식 버거 말고 콜라 하나", ("success", llm_items))
+        result, calls = self._korean("콜라 두 개 중에 하나만 주세요", ("success", llm_items))
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["status"], "success")
         self.assertEqual([(i.menu_id, i.quantity) for i in result["items"]], [("cola_01", 1)])
@@ -291,7 +291,7 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(result["items"], [])
 
     def test_korean_llm_failure_keeps_keyword_result(self):
-        result, calls = self._korean("클래식 버거 말고 콜라 하나", RuntimeError("503"))
+        result, calls = self._korean("콜라 두 개 중에 하나만 주세요", RuntimeError("503"))
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["status"], "success")
         self.assertTrue(result["items"])
@@ -386,6 +386,18 @@ class LLMServiceValidationTest(unittest.TestCase):
         for text, expected in cases.items():
             items = _fallback_keyword_parse(text, log_result=False)
             self.assertEqual([(i.menu_id, i.quantity) for i in items], expected, text)
+
+
+    def test_korean_correction_words_skip_llm(self):
+        result, calls = self._korean("클래식 버거 말고 콜라 하나", ("success", []))
+        self.assertEqual(calls, [])
+        self.assertEqual([(i.menu_id, i.quantity) for i in result["items"]], [("cola_01", 1)])
+
+    def test_korean_quantity_after_ro(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        items = _fallback_keyword_parse("콜라로 두 잔 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 2)])
 
 
 if __name__ == "__main__":

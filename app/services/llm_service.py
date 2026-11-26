@@ -398,7 +398,7 @@ NUMBER_MAP = {
 }
 
 QUANTITY_UNITS = ("개", "계", "게", "잔", "캔", "인분", "조각", "마리", "세트")
-QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만")
+QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만", "로", "으로")
 QUANTITY_PREFIX_PUNCTUATION = re.compile(r"[,.、。!?·~]")
 AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "새", "내", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
 NUMBER_PATTERN = r"\d+|" + "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))
@@ -645,7 +645,9 @@ ES_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(ES_QUANTITY_WORDS) + r"|[0-9]
 EN_QUANTITY_WORDS = {
     "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "couple": 2,
+    "to": 2, "too": 2,
 }
+EN_TWO_SOUNDALIKES = ("to", "too")
 EN_QUANTITY_PATTERN = re.compile(r"\b(" + "|".join(EN_QUANTITY_WORDS) + r"|[0-9]+)\b")
 TH_QUANTITY_WORDS = {
     "หนึ่ง": 1, "สอง": 2, "สาม": 3, "สี่": 4, "ห้า": 5,
@@ -750,7 +752,11 @@ def _es_quantity(segment: str) -> int | None:
 
 
 def _en_quantity(segment: str) -> int | None:
-    matches = list(EN_QUANTITY_PATTERN.finditer(segment.lower()))
+    lowered = segment.lower()
+    matches = [
+        match for match in EN_QUANTITY_PATTERN.finditer(lowered)
+        if match.group(1) not in EN_TWO_SOUNDALIKES or not lowered[match.end():].strip()
+    ]
     if not matches:
         return None
     token = matches[-1].group(1)
@@ -1332,7 +1338,7 @@ def _call_llm_sync(text: str, language: str = "ko", recheck: bool = False) -> tu
 
 
 KOREAN_LLM_CUE_PATTERN = re.compile(
-    r"말고|대신|취소|바꿔|바꾸|중에|하나만|한\s*개만|한\s*잔만|같은\s*걸로|아까|더\s*주|더\s*추가|(?:은|는)\s*빼"
+    r"취소|바꿔|바꾸|중에|하나만|한\s*개만|한\s*잔만|같은\s*걸로|아까|더\s*주|더\s*추가"
 )
 
 
