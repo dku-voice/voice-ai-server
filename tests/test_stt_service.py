@@ -186,7 +186,8 @@ class LanguagePickTest(unittest.TestCase):
         self.assertNotIn("리아", hotwords)
 
     def test_hotwords_are_not_used_for_foreign_languages(self):
-        self.assertIsNone(stt_service._hotwords_for("ja"))
+        self.assertIn("ja", stt_service.STT_HOTWORD_LANGUAGES)
+        self.assertNotIn("th", stt_service.STT_HOTWORD_LANGUAGES)
         self.assertIsNone(stt_service._hotwords_for("th"))
         self.assertIn("콜라", stt_service._hotwords_for("ko"))
 
