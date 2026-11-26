@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 BRAND_PREFIXES = ("리아",)
 FOREIGN_NAME_FIELDS = ("nameEn", "nameJa", "nameEs", "nameTh")
-LANGUAGE_NAME_FIELDS = {"ko": "nameKo", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
-FOREIGN_OPTION_FIELDS = {"ja": "nameJa", "es": "nameEs", "th": "nameTh"}
+LANGUAGE_NAME_FIELDS = {"ko": "nameKo", "en": "nameEn", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
+FOREIGN_OPTION_FIELDS = {"en": "nameEn", "ja": "nameJa", "es": "nameEs", "th": "nameTh"}
 FOREIGN_BRAND_PATTERN = re.compile(r"^(?:リア|ริอา|Ria)\s*|\s*\bRia$")
 
 

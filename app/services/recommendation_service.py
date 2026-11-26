@@ -451,7 +451,7 @@ def _format_documents_for_prompt(documents: Sequence[MenuDocument]) -> str:
     return "\n\n".join(document.page_content for document in documents)
 
 
-REASON_LANGUAGE_NAMES = {"ko": "한국어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
+REASON_LANGUAGE_NAMES = {"ko": "한국어", "en": "영어", "ja": "일본어", "es": "스페인어", "th": "태국어"}
 
 
 def _reason_language_instruction(language: str) -> str:

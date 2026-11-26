@@ -21,7 +21,7 @@ class VoiceOrderResponse(BaseModel):
     recognized_text: str = Field(..., description="STT 인식 텍스트")
     items: List[OrderItem] = Field(default=[], description="주문 항목")
     error_msg: Optional[str] = Field(default=None, description="에러 메시지")
-    language: str = Field(default="ko", description="감지된 발화 언어 'ko' | 'ja' | 'es' | 'th'")
+    language: str = Field(default="ko", description="감지된 발화 언어 'ko' | 'en' | 'ja' | 'es' | 'th'")
 
 
 class AgeAnalysisResponse(BaseModel):
@@ -37,7 +37,7 @@ class MenuRecommendationRequest(BaseModel):
     """메뉴 추천 요청"""
     query: str = Field(..., min_length=1, max_length=500, description="고객 요청 문장")
     top_k: int = Field(default=3, ge=1, le=5, description="추천 후보 개수")
-    language: str = Field(default="ko", description="추천 이유를 쓸 언어 'ko' | 'ja' | 'es' | 'th'")
+    language: str = Field(default="ko", description="추천 이유를 쓸 언어 'ko' | 'en' | 'ja' | 'es' | 'th'")
 
 
 class MenuRecommendationItem(BaseModel):

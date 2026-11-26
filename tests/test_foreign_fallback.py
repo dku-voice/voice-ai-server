@@ -13,8 +13,8 @@ PAYLOAD = {
                 "nameJa": "テリバーガー", "nameEs": "Hamburguesa Teri", "nameTh": "เทริเบอร์เกอร์",
                 "status": "ACTIVE",
                 "options": [
-                    {"nameKo": "치즈 추가", "nameJa": "チーズ追加", "nameEs": "Extra de queso", "nameTh": "เพิ่มชีส"},
-                    {"nameKo": "양파 제거", "nameJa": "玉ねぎ抜き", "nameEs": "Sin cebolla", "nameTh": "ไม่ใส่หอมหัวใหญ่"},
+                    {"nameKo": "치즈 추가", "nameEn": "Add Cheese", "nameJa": "チーズ追加", "nameEs": "Extra de queso", "nameTh": "เพิ่มชีส"},
+                    {"nameKo": "양파 제거", "nameEn": "No Onion", "nameJa": "玉ねぎ抜き", "nameEs": "Sin cebolla", "nameTh": "ไม่ใส่หอมหัวใหญ่"},
                 ],
             },
             {
@@ -157,6 +157,18 @@ class ForeignFallbackTest(unittest.TestCase):
             [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
         )
         self.assertEqual(self.parse("dos coca colas y unos palitos", "es"), [("14", 2, []), ("11", 1, [])])
+
+    def test_english_order_with_quantities_and_options(self):
+        self.assertEqual(
+            self.parse("Can I get two teri burgers with no onions, a cheese stick and three cokes please", "en"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+
+    def test_english_menu_name_alone_is_one(self):
+        self.assertEqual(self.parse("Cola please", "en"), [("14", 1, [])])
+
+    def test_english_option_name_from_menu_data(self):
+        self.assertEqual(self.parse("one Teri Burger, Add Cheese", "en"), [("1", 1, ["치즈 추가"])])
 
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
