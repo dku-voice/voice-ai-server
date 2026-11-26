@@ -219,8 +219,60 @@ def _option_allowed(menu_id: str, option_name: str) -> bool:
     return any(_normalize_order_text(name) == target for name in allowed)
 
 
+SAUCE_OPTION_NAMES = ("어니언 소스", "치즈 소스", "칠리 소스")
+SAUCE_FROM_OTHER_OPTION = {"치즈 추가": "치즈 소스"}
+SAUCE_FLAVOR_WORDS = {
+    "치즈 소스": ("치즈", "cheese", "チーズ", "ちーず", "queso", "ชีส"),
+    "칠리 소스": ("칠리", "칠레", "치리", "chili", "chilli", "chile", "チリ", "ちり", "ชิลลี่", "ชิลี", "พริก"),
+    "어니언 소스": (
+        "어니언", "어니온", "양파", "onion", "オニオン", "おにおん", "玉ねぎ", "たまねぎ", "タマネギ",
+        "cebolla", "หัวหอม", "หอม",
+    ),
+}
+
+
+def _menu_sauces(menu_id: str) -> list[str]:
+    return [name for name in SAUCE_OPTION_NAMES if _option_allowed(menu_id, name) and MENU_OPTIONS_BY_ID.get(menu_id) is not None]
+
+
+def _has_sauce(options: list[str]) -> bool:
+    return any(name in SAUCE_OPTION_NAMES for name in options)
+
+
 def _filter_options(menu_id: str, options: list[str]) -> list[str]:
-    return [name for name in options if _option_allowed(menu_id, name)]
+    if _menu_sauces(menu_id) and not _has_sauce(options):
+        options = [SAUCE_FROM_OTHER_OPTION.get(name, name) for name in options]
+    filtered = [name for name in options if _option_allowed(menu_id, name)]
+    sauces = [name for name in filtered if name in SAUCE_OPTION_NAMES]
+    if len(sauces) > 1:
+        filtered = [name for name in filtered if name not in SAUCE_OPTION_NAMES or name == sauces[0]]
+    return filtered
+
+
+def _sauce_from_text(menu_id: str, options: list[str], segment: str) -> list[str]:
+    sauces = _menu_sauces(menu_id)
+    if not sauces or _has_sauce(options) or not segment:
+        return options
+    text = segment.lower()
+    found = []
+    for sauce in sauces:
+        positions = [text.find(word.lower()) for word in SAUCE_FLAVOR_WORDS.get(sauce, ()) if word and word.lower() in text]
+        if positions:
+            found.append((min(positions), sauce))
+    if not found:
+        return options
+    return options + [min(found)[1]]
+
+
+def _sauce_instruction() -> str:
+    menus = [MENU_CATALOG[menu_id] for menu_id in MENU_CATALOG if _menu_sauces(menu_id)]
+    if not menus:
+        return ""
+    return (
+        f"{', '.join(menus)}의 소스는 {', '.join(SAUCE_OPTION_NAMES)} 중 하나입니다. "
+        "손님이 어떤 언어로든 치즈, 칠리, 어니언(양파) 맛이나 소스를 말하면 치즈 추가가 아니라 해당 소스 하나를 넣고, "
+        "소스를 말하지 않았으면 지어내지 마세요.\n"
+    )
 
 
 def _format_instruction() -> str:
@@ -234,7 +286,7 @@ def _format_instruction() -> str:
 
 options에는 아래 이름만 그대로 넣고, 요청이 없으면 빈 배열로 두세요.
 {", ".join(OPTION_NAMES)}
-"""
+{_sauce_instruction()}"""
 
 
 EXTRA_FOREIGN_ALIASES = {
@@ -968,7 +1020,9 @@ def _ja_fuzzy_parse(text: str) -> List[OrderItem]:
         for pattern, korean in FOREIGN_OPTION_PATTERNS.get("ja", ()):
             if pattern.search(segment) and korean not in options:
                 options.append(korean)
-        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
+        options = _filter_options(menu_id, options)
+        options = _sauce_from_text(menu_id, options, segment)
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=options))
     return _merge_duplicate_items(items)
 
 
@@ -990,7 +1044,9 @@ def _foreign_keyword_parse(text: str, language: str) -> List[OrderItem]:
     items: List[OrderItem] = []
     for position, ((_, _, menu_id), options) in enumerate(zip(menu_matches, options_per_menu)):
         quantity = _foreign_quantity(text, normalized_text, index_map, menu_matches, position, language)
-        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
+        next_start = menu_matches[position + 1][0] if position + 1 < len(menu_matches) else len(normalized_text)
+        options = _sauce_from_text(menu_id, _filter_options(menu_id, options), normalized_text[menu_matches[position][1]:next_start])
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=options))
     return _merge_duplicate_items(items)
 
 
@@ -1049,7 +1105,9 @@ def _fallback_keyword_parse(text: str, *, log_result: bool = True, language: str
             quantity = quantity_overrides[index]
             next_start = menu_matches[index + 1][0] if index + 1 < len(menu_matches) else len(normalized_text)
             consumed_until = next_start
-        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
+        next_start = menu_matches[index + 1][0] if index + 1 < len(menu_matches) else len(normalized_text)
+        options = _sauce_from_text(menu_id, _filter_options(menu_id, options), normalized_text[end_idx:next_start])
+        items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=options))
 
     items = _merge_duplicate_items(items)
     if log_result:
@@ -1404,7 +1462,36 @@ def korean_llm_reason(text: str, items: List[OrderItem]) -> str | None:
     return None
 
 
+def _fill_missing_sauces(items: List[OrderItem], text: str, language: str) -> List[OrderItem]:
+    if not any(_menu_sauces(item.menu_id) and not _has_sauce(item.options) for item in items):
+        return items
+    try:
+        keyword_items = _fallback_keyword_parse(text, log_result=False, language=language)
+    except Exception:
+        return items
+    sauce_by_menu = {}
+    for item in keyword_items:
+        sauce = next((name for name in item.options if name in SAUCE_OPTION_NAMES), None)
+        if sauce:
+            sauce_by_menu.setdefault(item.menu_id, sauce)
+    filled = []
+    for item in items:
+        sauce = sauce_by_menu.get(item.menu_id)
+        if sauce and _menu_sauces(item.menu_id) and not _has_sauce(item.options):
+            logger.info("[LLM] %s 소스를 문장에서 보충: %s", MENU_CATALOG.get(item.menu_id, item.menu_id), sauce)
+            item = OrderItem(menu_id=item.menu_id, quantity=item.quantity, options=item.options + [sauce])
+        filled.append(item)
+    return filled
+
+
 async def extract_order(text: str, language: str = "ko") -> dict:
+    result = await _extract_order(text, language)
+    if result.get("items"):
+        result["items"] = _fill_missing_sauces(result["items"], text, language)
+    return result
+
+
+async def _extract_order(text: str, language: str = "ko") -> dict:
     """
     WebSocket 핸들러에서 호출하는 주문 파싱 함수.
 

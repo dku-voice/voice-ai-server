@@ -10,6 +10,10 @@ PAYLOAD = {
                 {"nameKo": "치즈 추가"}, {"nameKo": "토마토 제거"}, {"nameKo": "양파 제거"}, {"nameKo": "소스 적게"},
                 {"nameKo": "비프패티 추가"}, {"nameKo": "반숙계란 추가"}, {"nameKo": "베이컨 추가"}, {"nameKo": "토마토 추가"},
             ]},
+            {"menuId": 9, "nameKo": "양념감자", "nameEn": "Seasoned Fries", "nameJa": "シーズニングポテト",
+             "nameEs": "Patatas sazonadas", "nameTh": "มันฝรั่งทอดปรุงรส", "status": "ACTIVE", "options": [
+                {"nameKo": "어니언 소스"}, {"nameKo": "치즈 소스"}, {"nameKo": "칠리 소스"},
+            ]},
             {"menuId": 14, "nameKo": "콜라", "status": "ACTIVE", "options": []},
             {"menuId": 20, "nameKo": "치즈스틱", "status": "ACTIVE"},
         ]
@@ -110,3 +114,32 @@ class MenuOptionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeasonedFriesSauceTest(MenuOptionTest):
+    def items(self, text, language="ko"):
+        return [(item.menu_id, item.quantity, item.options) for item in llm_service._fallback_keyword_parse(text, log_result=False, language=language)]
+
+    def test_short_sauce_words(self):
+        self.assertEqual(self.items("양념감자 칠리로 주세요"), [("9", 1, ["칠리 소스"])])
+        self.assertEqual(self.items("양념감자 치즈맛"), [("9", 1, ["치즈 소스"])])
+        self.assertEqual(self.items("양념감자 어니언으로"), [("9", 1, ["어니언 소스"])])
+        self.assertEqual(self.items("양념감자 하나랑 치즈스틱 하나"), [("9", 1, []), ("20", 1, [])])
+
+    def test_foreign_sauce_words(self):
+        cases = [
+            ("seasoned fries with cheese sauce", "en", "치즈 소스"),
+            ("seasoned fries with chili", "en", "칠리 소스"),
+            ("シーズニングポテトをチリソースで", "ja", "칠리 소스"),
+            ("patatas sazonadas con salsa de queso", "es", "치즈 소스"),
+            ("มันฝรั่งทอดปรุงรสซอสพริก", "th", "칠리 소스"),
+        ]
+        for text, language, sauce in cases:
+            self.assertEqual(self.items(text, language), [("9", 1, [sauce])], text)
+
+    def test_gemini_result_gets_sauce_from_text(self):
+        items = [llm_service.OrderItem(menu_id="9", quantity=1, options=[])]
+        filled = llm_service._fill_missing_sauces(items, "seasoned fries with onion please", "en")
+        self.assertEqual(filled[0].options, ["어니언 소스"])
+        self.assertEqual(llm_service._filter_options("9", ["치즈 추가"]), ["치즈 소스"])
+
