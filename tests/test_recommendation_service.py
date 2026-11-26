@@ -182,6 +182,15 @@ class FallbackSelectionTest(unittest.TestCase):
     def test_fallback_flips_negated_nutrition(self):
         self.assertEqual(self._ids("안 짠 거 추천"), ["9", "1", "5"])
         self.assertEqual(self._ids("안 기름진 거"), ["9", "5", "1"])
+        self.assertEqual(self._ids("짜지 않은 거"), ["9", "1", "5"])
+        self.assertEqual(self._ids("기름지지 않은 거"), ["9", "5", "1"])
+        self.assertEqual(self._ids("기름진 거"), ["1", "5", "9"])
+
+    def test_fallback_more_negation_wordings(self):
+        for query in ("맵지마", "매운 거 잘 못 먹어요", "매운 거 안 돼요", "매운 거 못 드세요", "순한 버거", "자극적이지 않은 버거"):
+            self.assertNotIn("5", self._ids(query), query)
+        self.assertNotIn("1", self._ids("달지 않은 버거"))
+        self.assertNotIn("1", self._ids("단 거 말고 버거"))
 
     def test_llm_pick_with_negated_feature_is_dropped(self):
         from app.services.recommendation_service import _parse_recommendation_response

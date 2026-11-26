@@ -515,7 +515,7 @@ def _fallback_reason(query: str, document: MenuDocument) -> str:
 FALLBACK_FEATURE_TERMS: tuple[tuple[str, re.Pattern], ...] = (
     ("매콤함", re.compile(r"매운|매콤|맵[지다고]|맵게|맵지")),
     ("산뜻함", re.compile(r"산뜻|상큼")),
-    ("달콤함", re.compile(r"달달|달콤|달아")),
+    ("달콤함", re.compile(r"달달|달콤|달아|달지|단\s*(?:거|것|게|걸|맛|음식|메뉴)")),
     ("바삭함", re.compile(r"바삭")),
     ("부드러움", re.compile(r"부드러")),
     ("고소함", re.compile(r"고소")),
@@ -527,23 +527,24 @@ FALLBACK_FEATURE_TERMS: tuple[tuple[str, re.Pattern], ...] = (
 )
 # 영양 수치 기준 질문: (표현, 영양 항목, 높은 순이면 True / 낮은 순이면 False)
 FALLBACK_NUTRITION_RULES: tuple[tuple[re.Pattern, str, bool], ...] = (
-    (re.compile(r"기름진|느끼"), "지방", True),
+    (re.compile(r"기름지|기름진|느끼"), "지방", True),
     (re.compile(r"담백|가벼운"), "지방", False),
     (re.compile(r"칼로리\s*(?:가\s*)?낮|저칼로리|다이어트"), "칼로리", False),
-    (re.compile(r"짭짤|짠\s*(?:거|것|맛|음식|메뉴)|짜게"), "나트륨", True),
+    (re.compile(r"짭짤|짠\s*(?:거|것|걸|게|맛|음식|메뉴)|짠(?=\s|$)|짜게|짜지"), "나트륨", True),
     (re.compile(r"단백질|고단백"), "단백질", True),
 )
 FALLBACK_PRICE_PATTERN = re.compile(r"싼|싸게|싸고|저렴|가성비|값싼|가격\s*낮|안\s*비싼|비싸지\s*않")
 NEGATION_BEFORE = re.compile(r"(?:안|덜)\s*$")
 NEGATION_AFTER = re.compile(
     r"^[가-힣]{0,3}\s*(?:거|것|건|게|걸|음식|메뉴)?\s*(?:은|는|이|가|을|를|로|으로)?\s*"
-    r"(?:말고|빼고|제외|싫|못\s*먹|별로|않|아닌|없는|안\s*(?:되|좋|먹))"
+    r"(?:말고|빼고|제외|싫|(?:잘\s*)?못\s*(?:먹|드)|별로|않|아닌|없는|안\s*(?:되|돼|좋|먹|드)|마(?![늘라시요]))"
 )
 FOREIGN_NEGATED_FEATURES: tuple[tuple[str, re.Pattern], ...] = (
     (
         "매콤함",
         re.compile(
-            r"not\s+(?:too\s+|very\s+|so\s+)?spicy|non-?spicy|no(?:thing)?\s+spicy|\bmild\b|can'?t\s+(?:eat|handle)\s+spicy"
+            r"순한|순하|자극적이지\s*않|안\s*자극적|자극\s*없"
+            r"|not\s+(?:too\s+|very\s+|so\s+)?spicy|non-?spicy|no(?:thing)?\s+spicy|\bmild\b|can'?t\s+(?:eat|handle)\s+spicy"
             r"|辛くな|辛いの(?:は|が)?(?:ダメ|だめ|苦手|無理)|辛くない"
             r"|sin\s+picante|no\s+(?:sea\s+|muy\s+|tan\s+)?picante|que\s+no\s+pique|nada\s+picante"
             r"|ไม่เผ็ด|กินเผ็ดไม่ได้",
