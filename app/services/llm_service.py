@@ -398,6 +398,7 @@ NUMBER_MAP = {
 
 QUANTITY_UNITS = ("개", "계", "게", "잔", "캔", "인분", "조각", "마리", "세트")
 QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만")
+QUANTITY_PREFIX_PUNCTUATION = re.compile(r"[,.、。!?·~]")
 AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
 NUMBER_PATTERN = r"\d+|" + "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))
 UNIT_PATTERN = "|".join(re.escape(unit) for unit in QUANTITY_UNITS)
@@ -448,7 +449,7 @@ def _find_quantity_near_menu(normalized_text: str, start_idx: int, end_idx: int)
     """메뉴명 바로 앞뒤에 붙은 수량 표현을 찾고, 없으면 1개로 처리한다."""
     after_window = normalized_text[end_idx:end_idx + 8]
     for after_match in QUANTITY_PATTERN.finditer(after_window):
-        prefix = after_window[:after_match.start()]
+        prefix = QUANTITY_PREFIX_PUNCTUATION.sub("", after_window[:after_match.start()])
         if prefix not in QUANTITY_AFTER_PREFIXES:
             continue
         quantity = _quantity_from_match(after_match)
@@ -1111,6 +1112,16 @@ def _parse_llm_response(raw_text: str, source_text: str, language: str = "ko", r
     return _validate_items_against_text(items, source_text)
 
 
+def _prefer_keywords_when_llm_empty(items: List[OrderItem], text: str, language: str) -> tuple[str, List[OrderItem]]:
+    if items or language == "ko":
+        return ("success", items)
+    keyword_items = _fallback_keyword_parse(text, language=language)
+    if keyword_items:
+        logger.info("[LLM] Gemini가 빈 결과를 줘서 키워드 결과 사용")
+        return ("fallback", keyword_items)
+    return ("success", items)
+
+
 def _call_llm_sync(text: str, language: str = "ko", recheck: bool = False) -> tuple[str, List[OrderItem]]:
     """
     동기 LLM 호출. FastAPI 쪽에서는 threadpool로 감싸서 부른다.
@@ -1142,7 +1153,7 @@ def _call_llm_sync(text: str, language: str = "ko", recheck: bool = False) -> tu
 
         items = _parse_llm_response(raw, text, language, recheck)
         logger.info("[LLM] Phase 1 성공. %s건 파싱됨 (%s)", len(items), describe_items(items))
-        return ("success", items)
+        return _prefer_keywords_when_llm_empty(items, text, language)
 
     except LLMConfigurationError as e:
         logger.warning("[LLM] 설정 오류, Phase 3 fallback 진입: %s", e)
@@ -1187,7 +1198,7 @@ def _call_llm_sync(text: str, language: str = "ko", recheck: bool = False) -> tu
 
         items = _parse_llm_response(raw, text, language, recheck)
         logger.info("[LLM] Phase 2 성공. %s건 파싱됨", len(items))
-        return ("success", items)
+        return _prefer_keywords_when_llm_empty(items, text, language)
 
     except Exception as e:
         logger.error("[LLM] Phase 2 실패, Phase 3 fallback 진입: %s", e)

@@ -180,6 +180,13 @@ class ForeignFallbackTest(unittest.TestCase):
         self.assertEqual(self.parse("ขอโคลาสอนเกี่ยว", "th"), [("14", 2, [])])
         self.assertEqual(self.parse("ขอคุณล่าสองแกลง", "th"), [("14", 2, [])])
 
+    def test_empty_llm_answer_uses_keywords_for_foreign(self):
+        phase, items = llm_service._prefer_keywords_when_llm_empty([], "ขอโคล่าสองแก้ว", "th")
+        self.assertEqual(phase, "fallback")
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("14", 2)])
+        phase, items = llm_service._prefer_keywords_when_llm_empty([], "สวัสดีครับ", "th")
+        self.assertEqual((phase, items), ("success", []))
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])
