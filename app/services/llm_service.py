@@ -975,6 +975,62 @@ def _text_has_known_menu(text: str) -> bool:
     return bool(_find_menu_matches(normalized_text))
 
 
+CHOSEONG = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+JUNGSEONG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+JONGSEONG = ("", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ")
+RECHECK_MIN_JAMO = 4
+RECHECK_MAX_DISTANCE_RATIO = 0.35
+
+
+def _jamo(text: str) -> str:
+    result = []
+    for char in text:
+        code = ord(char) - 0xAC00
+        if 0 <= code < 11172:
+            result.append(CHOSEONG[code // 588])
+            result.append(JUNGSEONG[(code % 588) // 28])
+            result.append(JONGSEONG[code % 28])
+        elif not char.isspace():
+            result.append(char.lower())
+    return "".join(result)
+
+
+def _approx_substring_distance(pattern: str, text: str) -> int:
+    previous = [0] * (len(text) + 1)
+    for i, pattern_char in enumerate(pattern, 1):
+        current = [i] + [0] * len(text)
+        for j, text_char in enumerate(text, 1):
+            current[j] = min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + (pattern_char != text_char),
+            )
+        previous = current
+    return min(previous)
+
+
+def _menu_sounds_present(menu_id: str, source_text: str) -> bool:
+    text_jamo = _jamo(source_text)
+    names = (MENU_CATALOG.get(menu_id, ""),) + tuple(MENU_ALIASES.get(menu_id, ()))
+    for name in names:
+        name_jamo = _jamo(name)
+        if len(name_jamo) < RECHECK_MIN_JAMO or not re.search("[가-힣]", name):
+            continue
+        limit = max(1, int(len(name_jamo) * RECHECK_MAX_DISTANCE_RATIO))
+        if _approx_substring_distance(name_jamo, text_jamo) <= limit:
+            return True
+    return False
+
+
+def _validate_recheck_items(items: List[OrderItem], source_text: str) -> List[OrderItem]:
+    items = _merge_duplicate_items(items)
+    keyword_menu_ids = {item.menu_id for item in _fallback_keyword_parse(source_text, log_result=False)}
+    for item in items:
+        if item.menu_id not in keyword_menu_ids and not _menu_sounds_present(item.menu_id, source_text):
+            raise LLMResponseValidationError(f"입력 문장에서 비슷한 발음을 찾지 못한 메뉴입니다: {item.menu_id}")
+    return items
+
+
 def _validate_items_against_text(items: List[OrderItem], source_text: str) -> List[OrderItem]:
     """LLM 결과가 실제 입력 텍스트와 맞는지 한번 더 확인한다."""
     items = _merge_duplicate_items(items)
@@ -1010,7 +1066,7 @@ def _validate_items_against_text(items: List[OrderItem], source_text: str) -> Li
     return items
 
 
-def _parse_llm_response(raw_text: str, source_text: str, language: str = "ko") -> List[OrderItem]:
+def _parse_llm_response(raw_text: str, source_text: str, language: str = "ko", recheck: bool = False) -> List[OrderItem]:
     """
     LLM 응답을 OrderItem 리스트로 바꾼다.
     JSON 형식, menu_id, 수량, 옵션까지 같이 확인한다.
@@ -1025,10 +1081,12 @@ def _parse_llm_response(raw_text: str, source_text: str, language: str = "ko") -
     items = [_coerce_order_item(entry) for entry in parsed]
     if language != "ko":
         return _merge_duplicate_items(items)
+    if recheck:
+        return _validate_recheck_items(items, source_text)
     return _validate_items_against_text(items, source_text)
 
 
-def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem]]:
+def _call_llm_sync(text: str, language: str = "ko", recheck: bool = False) -> tuple[str, List[OrderItem]]:
     """
     동기 LLM 호출. FastAPI 쪽에서는 threadpool로 감싸서 부른다.
 
@@ -1057,7 +1115,7 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
         if raw is None:
             raise LLMResponseValidationError("LLM 응답 content가 None입니다.")
 
-        items = _parse_llm_response(raw, text, language)
+        items = _parse_llm_response(raw, text, language, recheck)
         logger.info("[LLM] Phase 1 성공. %s건 파싱됨 (%s)", len(items), describe_items(items))
         return ("success", items)
 
@@ -1102,7 +1160,7 @@ def _call_llm_sync(text: str, language: str = "ko") -> tuple[str, List[OrderItem
         if raw is None:
             raise LLMResponseValidationError("LLM 응답 content가 None입니다.")
 
-        items = _parse_llm_response(raw, text, language)
+        items = _parse_llm_response(raw, text, language, recheck)
         logger.info("[LLM] Phase 2 성공. %s건 파싱됨", len(items))
         return ("success", items)
 
@@ -1164,7 +1222,7 @@ async def extract_order(text: str, language: str = "ko") -> dict:
             return {"status": "success", "items": items, "error_msg": None}
         logger.info("[LLM] 한국어 키워드 결과를 Gemini로 다시 확인 (%s)", reason)
         try:
-            phase, llm_items = await run_llm_task(_call_llm_sync, text, language)
+            phase, llm_items = await run_llm_task(_call_llm_sync, text, language, True)
         except Exception as e:
             logger.error("[LLM] 한국어 Gemini 확인 실패, 키워드 결과 사용: %s", e)
             return {"status": "success", "items": items, "error_msg": None}

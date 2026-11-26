@@ -313,5 +313,34 @@ class LLMServiceValidationTest(unittest.TestCase):
         self.assertEqual(result["items"], [])
 
 
+    def test_recheck_accepts_menu_with_similar_sound(self):
+        from app.services.llm_service import _parse_llm_response
+
+        raw = '[{"menu_id": "classic-burger", "quantity": 2, "options": []}, {"menu_id": "cola_01", "quantity": 3, "options": []}]'
+        items = _parse_llm_response(raw, "클레식 보거 두 개랑 골라 세 개", "ko", recheck=True)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("classic-burger", 2), ("cola_01", 3)])
+
+    def test_recheck_rejects_menu_without_any_evidence(self):
+        from app.services.llm_service import LLMResponseValidationError, _parse_llm_response
+
+        raw = '[{"menu_id": "fries_01", "quantity": 1, "options": []}]'
+        with self.assertRaises(LLMResponseValidationError):
+            _parse_llm_response(raw, "안녕하세요 반가워요", "ko", recheck=True)
+
+    def test_recheck_allows_dropping_and_changing_quantity(self):
+        from app.services.llm_service import _parse_llm_response
+
+        raw = '[{"menu_id": "cola_01", "quantity": 1, "options": []}]'
+        items = _parse_llm_response(raw, "감자튀김 말고 콜라 하나만", "ko", recheck=True)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 1)])
+
+    def test_strict_korean_validation_is_unchanged(self):
+        from app.services.llm_service import LLMResponseValidationError, _parse_llm_response
+
+        raw = '[{"menu_id": "classic-burger", "quantity": 2, "options": []}]'
+        with self.assertRaises(LLMResponseValidationError):
+            _parse_llm_response(raw, "클레식 보거 두 개", "ko")
+
+
 if __name__ == "__main__":
     unittest.main()
