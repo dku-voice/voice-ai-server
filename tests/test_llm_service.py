@@ -337,5 +337,14 @@ class LLMServiceValidationTest(unittest.TestCase):
             _parse_llm_response(raw, "클레식 보거 두 개", "ko")
 
 
+    def test_korean_quantity_after_comma(self):
+        from app.services.llm_service import _fallback_keyword_parse
+
+        items = _fallback_keyword_parse("콜라, 네 잔 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 4)])
+        items = _fallback_keyword_parse("콜라, 두 잔 주세요", log_result=False)
+        self.assertEqual([(i.menu_id, i.quantity) for i in items], [("cola_01", 2)])
+
+
 if __name__ == "__main__":
     unittest.main()
