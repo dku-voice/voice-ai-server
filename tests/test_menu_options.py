@@ -56,6 +56,13 @@ class MenuOptionTest(unittest.TestCase):
             [("1", 2, ["토마토 제거", "양파 제거", "소스 적게"])],
         )
 
+    def test_less_sauce_mishearings(self):
+        self.assertEqual(
+            self.parse("데리버거, 치즈 추가, 토마토 빼고, 양파도 빼, 그리고 소스도 적혀져"),
+            [("1", 1, ["치즈 추가", "토마토 제거", "양파 제거", "소스 적게"])],
+        )
+        self.assertEqual(self.parse("데리버거 소스 저게 주세요"), [("1", 1, ["소스 적게"])])
+
     def test_add_options_with_aliases(self):
         self.assertEqual(
             self.parse("데리버거 패티 추가 반숙 계란 추가 베이컨 추가 토마토 추가"),
