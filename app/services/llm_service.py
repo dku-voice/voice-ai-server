@@ -394,12 +394,13 @@ NUMBER_MAP = {
     "여덟개": 8, "여덟": 8, "팔": 8, "8": 8,
     "아홉개": 9, "아홉": 9, "구": 9, "9": 9,
     "열개": 10, "열": 10, "십": 10, "10": 10,
+    "새": 3, "새전": 3, "내": 4, "내장": 4,
 }
 
 QUANTITY_UNITS = ("개", "계", "게", "잔", "캔", "인분", "조각", "마리", "세트")
 QUANTITY_AFTER_PREFIXES = ("", "을", "를", "은", "는", "도", "만")
 QUANTITY_PREFIX_PUNCTUATION = re.compile(r"[,.、。!?·~]")
-AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
+AMBIGUOUS_UNITLESS_NUMBERS = {"한", "두", "세", "네", "새", "내", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구", "십"}
 NUMBER_PATTERN = r"\d+|" + "|".join(re.escape(token) for token in sorted(NUMBER_MAP, key=len, reverse=True))
 UNIT_PATTERN = "|".join(re.escape(unit) for unit in QUANTITY_UNITS)
 QUANTITY_PATTERN = re.compile(rf"(?P<number>{NUMBER_PATTERN})(?P<unit>{UNIT_PATTERN})?")
@@ -484,10 +485,20 @@ def _is_menu_excluded_by_context(normalized_text: str, start_idx: int, end_idx: 
         return True
 
     after_window = normalized_text[end_idx:end_idx + 12]
-    for particle in MENU_EXCLUDE_PARTICLES:
-        for word in MENU_EXCLUDE_AFTER_WORDS:
-            if after_window.startswith(particle + word):
-                return True
+    windows = [after_window]
+    tail = QUANTITY_PREFIX_PUNCTUATION.sub("", normalized_text[end_idx:end_idx + 16])
+    quantity_match = QUANTITY_PATTERN.match(tail)
+    if quantity_match:
+        try:
+            if _quantity_from_match(quantity_match) is not None:
+                windows.append(tail[quantity_match.end():])
+        except LLMResponseValidationError:
+            pass
+    for window in windows:
+        for particle in MENU_EXCLUDE_PARTICLES:
+            for word in MENU_EXCLUDE_AFTER_WORDS:
+                if window.startswith(particle + word):
+                    return True
     return False
 
 
