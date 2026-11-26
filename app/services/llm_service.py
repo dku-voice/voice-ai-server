@@ -1050,6 +1050,46 @@ def _menu_sounds_present(menu_id: str, source_text: str) -> bool:
     return False
 
 
+THAI_TONE_MARKS = re.compile("[\u0e48-\u0e4c]")
+FOREIGN_SOUND_PUNCTUATION = re.compile(r"[\s\-_,.!?¡¿'\"、。・ー「」！？]")
+
+
+def _sound_key(text: str) -> str:
+    text = _ja_kana_key(text).translate(ACCENT_FOLD)
+    text = THAI_TONE_MARKS.sub("", text)
+    return FOREIGN_SOUND_PUNCTUATION.sub("", text)
+
+
+GENERIC_MENU_WORDS = re.compile(r"hamburguesas?|burgers?|バーガー|เบอร์เกอร์|\bde\b|\bcon\b", re.IGNORECASE)
+
+
+def _menu_sounds_present_foreign(menu_id: str, source_text: str) -> bool:
+    text_key = _sound_key(source_text)
+    names = (MENU_CATALOG.get(menu_id, ""),) + tuple(MENU_ALIASES.get(menu_id, ()))
+    compared = False
+    for name in names:
+        name_key = _sound_key(GENERIC_MENU_WORDS.sub(" ", name))
+        if len(name_key) < 3 or re.search("[가-힣]", name):
+            continue
+        compared = True
+        limit = max(1, int(len(name_key) * RECHECK_MAX_DISTANCE_RATIO))
+        if _approx_substring_distance(name_key, text_key) <= limit:
+            return True
+    return not compared
+
+
+def _validate_foreign_items(items: List[OrderItem], source_text: str, language: str) -> List[OrderItem]:
+    items = _merge_duplicate_items(items)
+    keyword_menu_ids = {item.menu_id for item in _fallback_keyword_parse(source_text, log_result=False, language=language)}
+    kept = []
+    for item in items:
+        if item.menu_id in keyword_menu_ids or _menu_sounds_present_foreign(item.menu_id, source_text):
+            kept.append(item)
+        else:
+            logger.warning("[LLM] 받아 적은 문장에 발음 근거가 없는 메뉴 제외: %s", MENU_CATALOG.get(item.menu_id, item.menu_id))
+    return kept
+
+
 def _validate_recheck_items(items: List[OrderItem], source_text: str) -> List[OrderItem]:
     items = _merge_duplicate_items(items)
     keyword_menu_ids = {item.menu_id for item in _fallback_keyword_parse(source_text, log_result=False)}
@@ -1108,7 +1148,7 @@ def _parse_llm_response(raw_text: str, source_text: str, language: str = "ko", r
 
     items = [_coerce_order_item(entry) for entry in parsed]
     if language != "ko":
-        return _merge_duplicate_items(items)
+        return _validate_foreign_items(items, source_text, language)
     if recheck:
         return _validate_recheck_items(items, source_text)
     return _validate_items_against_text(items, source_text)
