@@ -170,6 +170,12 @@ class ForeignFallbackTest(unittest.TestCase):
     def test_english_option_name_from_menu_data(self):
         self.assertEqual(self.parse("one Teri Burger, Add Cheese", "en"), [("1", 1, ["치즈 추가"])])
 
+    def test_japanese_onion_misheard_as_uki(self):
+        self.assertEqual(
+            self.parse("テリバーガーを2つ玉ねぎに浮きて それとチーズスティックコーヒーとつとコーラを見つくださり", "ja"),
+            [("1", 2, ["양파 제거"]), ("11", 1, []), ("14", 3, [])],
+        )
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])
