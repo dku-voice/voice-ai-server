@@ -244,6 +244,10 @@ class ForeignFallbackTest(unittest.TestCase):
         self.assertEqual(options("チーズとベーコン追加", "ja"), ["베이컨 추가", "치즈 추가"])
         self.assertEqual(options("เพิ่มชีสและเบคอน", "th"), ["베이컨 추가", "치즈 추가"])
         self.assertEqual(options("with extra cheese and a coke", "en"), ["치즈 추가"])
+        self.assertEqual(options("add cheese and also bacon", "en"), ["베이컨 추가", "치즈 추가"])
+        self.assertEqual(options("sin cebolla y también tomate", "es"), ["양파 제거", "토마토 제거"])
+        self.assertEqual(options("チーズもベーコンも追加", "ja"), ["베이컨 추가", "치즈 추가"])
+        self.assertEqual(options("ไม่ใส่หอมแล้วก็มะเขือเทศ", "th"), ["양파 제거", "토마토 제거"])
 
     def test_cheese_sticks_are_not_cheese_option(self):
         self.assertEqual(self.parse("a teri burger with cheese sticks", "en"), [("1", 1, []), ("11", 1, [])])

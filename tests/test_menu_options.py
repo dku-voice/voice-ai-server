@@ -73,6 +73,16 @@ class MenuOptionTest(unittest.TestCase):
         self.assertEqual(self.parse("데리버거 양파랑 토마토 빼줘"), [("1", 1, ["양파 제거", "토마토 제거"])])
         self.assertEqual(self.parse("데리버거 치즈 빼고 베이컨 추가"), [("1", 1, ["베이컨 추가"])])
 
+    def test_comma_between_ingredient_and_trigger(self):
+        self.assertEqual(self.parse("데리버거 양파, 제거"), [("1", 1, ["양파 제거"])])
+        self.assertEqual(self.parse("데리버거 토마토랑 양파, 제거하죠"), [("1", 1, ["토마토 제거", "양파 제거"])])
+        self.assertEqual(self.parse("데리버거 소스, 적게"), [("1", 1, ["소스 적게"])])
+
+    def test_more_list_connectors(self):
+        self.assertEqual(self.parse("데리버거, 비프패티란, 베이컨, 반숙계란 추가"), [("1", 1, ["비프패티 추가", "베이컨 추가", "반숙계란 추가"])])
+        self.assertEqual(self.parse("데리버거 치즈하구 베이컨 추가"), [("1", 1, ["치즈 추가", "베이컨 추가"])])
+        self.assertEqual(self.parse("데리버거 치즈 또 베이컨 추가"), [("1", 1, ["치즈 추가", "베이컨 추가"])])
+
     def test_more_korean_option_expressions(self):
         self.assertEqual(self.parse("데리버거 양파는 넣지 마세요"), [("1", 1, ["양파 제거"])])
         self.assertEqual(self.parse("데리버거 노 어니언"), [("1", 1, ["양파 제거"])])
