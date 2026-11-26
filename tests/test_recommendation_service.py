@@ -172,6 +172,34 @@ class FallbackSelectionTest(unittest.TestCase):
     def test_fallback_picks_by_feature_tag(self):
         self.assertEqual(self._ids("매운 거 추천해줘"), ["5"])
 
+    def test_fallback_excludes_negated_feature(self):
+        for query in ("안매운 버거 추천해줘", "맵지 않은 버거", "매운 거 말고 버거 추천", "매운 거 못 먹어요 버거 추천해줘", "덜 매운 버거"):
+            self.assertEqual(self._ids(query), ["1"], query)
+        self.assertNotIn("5", self._ids("not spicy burger please"))
+        self.assertNotIn("5", self._ids("辛くないバーガー"))
+        self.assertEqual(self._ids("제일 매운 버거"), ["5"])
+
+    def test_fallback_flips_negated_nutrition(self):
+        self.assertEqual(self._ids("안 짠 거 추천"), ["9", "1", "5"])
+        self.assertEqual(self._ids("안 기름진 거"), ["9", "5", "1"])
+        self.assertEqual(self._ids("짜지 않은 거"), ["9", "1", "5"])
+        self.assertEqual(self._ids("기름지지 않은 거"), ["9", "5", "1"])
+        self.assertEqual(self._ids("기름진 거"), ["1", "5", "9"])
+
+    def test_fallback_more_negation_wordings(self):
+        for query in ("맵지마", "매운 거 잘 못 먹어요", "매운 거 안 돼요", "매운 거 못 드세요", "순한 버거", "자극적이지 않은 버거"):
+            self.assertNotIn("5", self._ids(query), query)
+        self.assertNotIn("1", self._ids("달지 않은 버거"))
+        self.assertNotIn("1", self._ids("단 거 말고 버거"))
+
+    def test_llm_pick_with_negated_feature_is_dropped(self):
+        from app.services.recommendation_service import _parse_recommendation_response
+        raw = '{"recommendations": [{"menu_id": "5", "reason": "매콤함"}, {"menu_id": "1", "reason": "달콤함"}]}'
+        items = _parse_recommendation_response(raw, self.docs, 3, query="안매운 버거 추천해줘")
+        self.assertEqual([item.menu_id for item in items], ["1"])
+        with self.assertRaises(Exception):
+            _parse_recommendation_response('{"recommendations": [{"menu_id": "5", "reason": "x"}]}', self.docs, 3, query="안매운 버거 추천해줘")
+
     def test_fallback_picks_cheapest_first_for_price_query(self):
         self.assertEqual(self._ids("싼 거"), ["14", "17", "9"])
 
