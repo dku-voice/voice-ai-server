@@ -207,6 +207,36 @@ class ForeignFallbackTest(unittest.TestCase):
         self.assertEqual(self.parse("I want to order a cola", "en"), [("14", 1, [])])
         self.assertEqual(self.parse("I want to order cola", "en"), [("14", 1, [])])
 
+    def test_option_expressions_in_every_language(self):
+        def options(text, language):
+            normalized, _ = llm_service._normalize_with_map(text)
+            return [name for _, _, name in llm_service._find_foreign_option_matches(normalized, language)]
+
+        cases = {
+            ("without onions", "en"): ["양파 제거"],
+            ("no tomato", "en"): ["토마토 제거"],
+            ("with extra bacon", "en"): ["베이컨 추가"],
+            ("add an egg", "en"): ["반숙계란 추가"],
+            ("light on the sauce", "en"): ["소스 적게"],
+            ("double patty", "en"): ["비프패티 추가"],
+            ("sin cebolla y sin tomate", "es"): ["양파 제거", "토마토 제거"],
+            ("con tocino extra", "es"): ["베이컨 추가"],
+            ("con poca salsa", "es"): ["소스 적게"],
+            ("トマト抜き", "ja"): ["토마토 제거"],
+            ("玉ねぎいらない", "ja"): ["양파 제거"],
+            ("ベーコン多め", "ja"): ["베이컨 추가"],
+            ("ソース少なめ", "ja"): ["소스 적게"],
+            ("ไม่ใส่มะเขือเทศ", "th"): ["토마토 제거"],
+            ("เพิ่มเบคอน", "th"): ["베이컨 추가"],
+            ("ซอสน้อย", "th"): ["소스 적게"],
+        }
+        for (text, language), expected in cases.items():
+            self.assertEqual(options(text, language), expected, text)
+
+    def test_cheese_sticks_are_not_cheese_option(self):
+        self.assertEqual(self.parse("a teri burger with cheese sticks", "en"), [("1", 1, []), ("11", 1, [])])
+        self.assertEqual(self.parse("テリバーガーとチーズスティック追加", "ja"), [("1", 1, []), ("11", 1, [])])
+
     def test_japanese_small_talk_adds_nothing(self):
         self.assertEqual(self.parse("ありがとう", "ja"), [])
         self.assertEqual(self.parse("こんにちは", "ja"), [])

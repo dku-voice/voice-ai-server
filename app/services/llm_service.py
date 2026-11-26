@@ -162,11 +162,13 @@ OPTION_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("치즈 소스", ("치즈소스",), "mention"),
     ("칠리 소스", ("칠리소스",), "mention"),
     ("어니언 소스", ("어니언소스",), "mention"),
+    ("양파 제거", ("노어니언", "노양파"), "mention"),
+    ("토마토 제거", ("노토마토",), "mention"),
 )
 OPTION_TRIGGERS = {
-    "add": ("추가", "넣어", "올려", "얹어", "더", "많이", "플러스"),
-    "remove": ("제거", "빼", "없이", "말고", "삭제", "안넣", "넣지말"),
-    "less": ("적게", "적혀", "저게", "적개", "적계", "조금", "덜", "약간", "살짝"),
+    "add": ("추가", "추기", "츄가", "넣어", "올려", "얹어", "더", "많이", "플러스", "듬뿍"),
+    "remove": ("제거", "재거", "제고", "빼", "뻬", "뺀", "없이", "말고", "삭제", "제외", "안넣", "넣지말", "넣지마"),
+    "less": ("적게", "적혀", "저게", "적개", "적계", "젖어", "적께", "쩍게", "작게", "조금", "덜", "약간", "살짝", "줄여", "살살"),
     "mention": ("",),
 }
 OPTION_FILLERS = ("", "를", "을", "은", "는", "도", "만", "좀", "하나", "한장", "한개", "1장", "1개", "두장", "2장")
@@ -804,18 +806,71 @@ def _foreign_option_names(language: str) -> dict[str, str]:
     return {_normalize_order_text(name): korean for name, korean in names.items() if name and korean}
 
 
-JA_OPTION_PATTERNS = (
-    (re.compile("(?:玉ねぎ|玉葱|たまねぎ|タマネギ|タマネキ|おにおん|オニオン).{0,2}?(?:抜|浮き|ぬき|ヌキ|ぬけ|なし|ナシ|のき|ノキ|切れ)"), "양파 제거"),
-    (re.compile("(?:とまと|トマト).{0,2}?(?:抜|浮き|ぬき|ヌキ|ぬけ|なし|ナシ|のき|ノキ|切れ)"), "토마토 제거"),
+FOREIGN_OPTION_INGREDIENTS = {
+    "양파": {
+        "en": r"onions?", "es": r"cebollas?", "th": r"หอมหัวใหญ่|หอมใหญ่|หัวหอม|หอม",
+        "ja": r"玉ねぎ|玉葱|たまねぎ|タマネギ|タマネキ|ダマネギ|だまねぎ|おにおん|オニオン",
+    },
+    "토마토": {"en": r"tomato(?:es)?", "es": r"tomates?", "th": r"มะเขือเทศ", "ja": r"とまと|トマト"},
+    "치즈": {"en": r"cheese", "es": r"queso", "th": r"ชีส", "ja": r"チーズ|ちーず"},
+    "베이컨": {"en": r"bacon", "es": r"tocino|beicon|bacon", "th": r"เบคอน", "ja": r"ベーコン|べーこん"},
+    "비프패티": {"en": r"(?:beef)?patty|patties", "es": r"carne", "th": r"แพตตี้|เนื้อ", "ja": r"パティ|ぱてぃ"},
+    "반숙계란": {"en": r"eggs?", "es": r"huevos?", "th": r"ไข่", "ja": r"卵|玉子|たまご|タマゴ|目玉焼き"},
+    "소스": {"en": r"sauce", "es": r"salsa", "th": r"ซอส", "ja": r"ソース|そーす"},
+}
+FOREIGN_OPTION_TRIGGERS = {
+    "remove": {
+        "en": (r"no|without|holdthe|hold|skipthe|skip|minus|noneof|lose(?:the)?", r"removed|off"),
+        "es": (r"sin|nadade|quita(?:r|le)?(?:la|el|las|los)?|quitando", r"no"),
+        "ja": (None, r"抜|浮き|ぬき|ヌキ|ぬけ|なし|ナシ|無し|のき|ノキ|切れ|いらない|要らない|いらん|除いて|のぞいて|入れないで|いれないで"),
+        "th": (r"ไม่ใส่|ไม่เอา|ไม่ต้องใส่|ไม่รับ|เอาออก|ไม่", r"ออก"),
+    },
+    "add": {
+        "en": (r"extra|add(?:the)?|addsome|more|double|plus|with", r"extra|ontop|added"),
+        "es": (r"extra(?:de)?|conmas|con|mas|doble|agrega(?:r|le)?|anade|anadir", r"extra|adicional|doble"),
+        "ja": (None, r"追加|ついか|多め|おおめ|増し|まし|大盛り|トッピング|乗せ|のせ|入れて|いれて|ダブル"),
+        "th": (r"เพิ่ม|ใส่เพิ่ม|เอาเพิ่ม|ขอเพิ่ม|พิเศษ", r"เพิ่ม|พิเศษ|เยอะๆ|เยอะ"),
+    },
+    "less": {
+        "en": (r"less|light|lite|alittle|little|easyon(?:the)?|notmuch|go(?:easy|light)on(?:the)?", r"light|less|onthelightside"),
+        "es": (r"poca|poco|menos|pocade|ligera(?:de)?", r"ligera|poca|poco"),
+        "ja": (None, r"少なめ|すくなめ|少し|すこし|控えめ|ひかえめ|ちょっと|少なく"),
+        "th": (r"น้อย", r"น้อยๆ|น้อย|นิดเดียว|นิดหน่อย"),
+    },
+}
+FOREIGN_OPTION_KINDS = (
+    ("양파 제거", "양파", "remove"),
+    ("토마토 제거", "토마토", "remove"),
+    ("치즈 추가", "치즈", "add"),
+    ("토마토 추가", "토마토", "add"),
+    ("베이컨 추가", "베이컨", "add"),
+    ("비프패티 추가", "비프패티", "add"),
+    ("반숙계란 추가", "반숙계란", "add"),
+    ("소스 적게", "소스", "less"),
 )
+
+
+def _build_foreign_option_patterns() -> dict[str, tuple[tuple[re.Pattern, str], ...]]:
+    patterns: dict[str, list[tuple[re.Pattern, str]]] = {}
+    for korean, ingredient, kind in FOREIGN_OPTION_KINDS:
+        for language, words in FOREIGN_OPTION_INGREDIENTS[ingredient].items():
+            before, after = FOREIGN_OPTION_TRIGGERS[kind][language]
+            gap = ".{0,2}?" if language in ("ja", "th") else ".{0,6}?"
+            if before:
+                patterns.setdefault(language, []).append((re.compile(f"(?:{before}){gap}(?:{words})"), korean))
+            if after:
+                patterns.setdefault(language, []).append((re.compile(f"(?:{words}){gap}(?:{after})"), korean))
+    return {language: tuple(items) for language, items in patterns.items()}
+
+
+FOREIGN_OPTION_PATTERNS = _build_foreign_option_patterns()
 
 
 def _find_foreign_option_matches(normalized_text: str, language: str) -> list[tuple[int, int, str]]:
     candidates = []
-    if language == "ja":
-        for pattern, korean in JA_OPTION_PATTERNS:
-            for match in pattern.finditer(normalized_text):
-                candidates.append((match.start(), match.end(), korean))
+    for pattern, korean in FOREIGN_OPTION_PATTERNS.get(language, ()):
+        for match in pattern.finditer(normalized_text):
+            candidates.append((match.start(), match.end(), korean))
     for name, korean in _foreign_option_names(language).items():
         start_idx = normalized_text.find(name)
         while start_idx != -1:
@@ -910,7 +965,7 @@ def _ja_fuzzy_parse(text: str) -> List[OrderItem]:
         for name, korean in option_names.items():
             if name and name in segment and korean not in options:
                 options.append(korean)
-        for pattern, korean in JA_OPTION_PATTERNS:
+        for pattern, korean in FOREIGN_OPTION_PATTERNS.get("ja", ()):
             if pattern.search(segment) and korean not in options:
                 options.append(korean)
         items.append(OrderItem(menu_id=menu_id, quantity=quantity, options=_filter_options(menu_id, options)))
